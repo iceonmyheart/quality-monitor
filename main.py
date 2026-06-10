@@ -242,6 +242,7 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
+# ================= HTML =================
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -249,50 +250,28 @@ def index():
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Оптимасеть | Мониторинг качества услуг</title>
+    <title>Оптимасеть | Мониторинг качества</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
     <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
     <style>
-        * { transition: all 0.2s ease; }
-        body { font-family: 'Segoe UI', 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); }
-        :root {
-            --bg-light: #ffffff;
-            --bg-dark: #0a192f;
-            --text-light: #1e293b;
-            --text-dark: #e6f1ff;
-            --primary-light: #15803d;
-            --primary-dark: #00b4d8;
-            --border-light: #e2e8f0;
-            --border-dark: #1e4a76;
-        }
-        body.light { --bg: var(--bg-light); --text: var(--text-light); --primary: var(--primary-light); --border: var(--border-light); }
-        body.dark { --bg: var(--bg-dark); --text: var(--text-dark); --primary: var(--primary-dark); --border: var(--border-dark); }
-        body { background: var(--bg); color: var(--text); }
-        .card { background: var(--bg); border: 1px solid var(--border); border-radius: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: transform 0.2s, box-shadow 0.2s; }
-        .card:hover { box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
-        .btn-primary { background: var(--primary); color: white; border-radius: 0.5rem; padding: 0.5rem 1rem; font-weight: 500; transition: all 0.2s; }
-        .btn-primary:hover { filter: brightness(1.05); transform: translateY(-1px); }
-        .status-badge { display: inline-block; padding: 0.2rem 0.7rem; border-radius: 2rem; font-size: 0.7rem; font-weight: 600; }
-        .status-new { background: #facc1520; color: #facc15; }
-        .status-in_progress { background: #3b82f620; color: #3b82f6; }
-        .status-resolved { background: #22c55e20; color: #22c55e; }
-        .status-closed { background: #64748b20; color: #94a3b8; }
-        .tab-btn { padding: 0.5rem 1rem; border-radius: 2rem; transition: all 0.2s; font-weight: 500; }
-        .tab-btn.active { background: var(--primary); color: white; }
-        input, select, textarea { background: var(--bg); border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.5rem; width: 100%; color: var(--text); }
-        input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); ring: 2px solid var(--primary); }
-        .table-optim th { background: var(--bg); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.75rem; border-bottom: 1px solid var(--border); }
-        .table-optim td { padding: 0.75rem; border-bottom: 1px solid var(--border); }
-        .animate-pulse { animation: pulse 1.5s cubic-bezier(0.4,0,0.6,1) infinite; }
-        @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+        body.light { background:#ffffff; color:#1e293b; }
+        body.dark { background:#0a192f; color:#e6f1ff; }
+        .card { background: var(--bg); border:1px solid #e2e8f0; border-radius:1rem; padding:1.5rem; margin-bottom:1.5rem; }
+        .btn-primary { background:#15803d; color:white; padding:0.5rem 1rem; border-radius:0.5rem; }
+        .status-badge { padding:0.2rem 0.7rem; border-radius:2rem; font-size:0.7rem; }
+        .status-new { background:#facc1520; color:#facc15; }
+        .status-in_progress { background:#3b82f620; color:#3b82f6; }
+        .status-resolved { background:#22c55e20; color:#22c55e; }
+        .status-closed { background:#64748b20; color:#94a3b8; }
+        .tab-btn.active { background:#15803d; color:white; }
+        input, select, textarea { background:#0f172a; border:1px solid #334155; border-radius:0.5rem; padding:0.5rem; width:100%; color:white; }
     </style>
 </head>
 <body class="light">
 <div class="max-w-7xl mx-auto px-4 py-6">
-    <div class="flex justify-between items-center mb-8 p-4 bg-white shadow-sm rounded-2xl border border-gray-100">
+    <div class="flex justify-between items-center mb-8 p-4 bg-white shadow rounded-2xl">
         <div class="flex items-center gap-3">
             <div class="text-3xl">🛜</div>
             <div>
@@ -301,45 +280,35 @@ def index():
             </div>
         </div>
         <div class="flex items-center gap-4">
-            <button id="themeToggle" class="text-2xl opacity-80 hover:opacity-100 transition">🌙</button>
-            <div id="userPanel" class="flex items-center gap-3 bg-gray-50 px-3 py-1 rounded-full border border-gray-200"></div>
+            <button id="themeToggle" class="text-2xl">🌙</button>
+            <div id="userPanel"></div>
         </div>
     </div>
     <div id="app"></div>
 </div>
 <script>
     let currentUser = null;
-    let currentTheme = localStorage.getItem('theme') || 'light';
-    const notyf = new Notyf({ duration: 3000, position: { x: 'right', y: 'top' } });
+    let theme = localStorage.getItem('theme') || 'light';
+    const notyf = new Notyf({ duration:3000, position:{x:'right',y:'top'} });
 
     function applyTheme() {
-        if (currentTheme === 'dark') {
-            document.body.classList.remove('light');
-            document.body.classList.add('dark');
-            document.getElementById('themeToggle').innerText = '☀️';
-        } else {
-            document.body.classList.remove('dark');
-            document.body.classList.add('light');
-            document.getElementById('themeToggle').innerText = '🌙';
-        }
-        localStorage.setItem('theme', currentTheme);
+        if(theme === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); document.getElementById('themeToggle').innerText='☀️'; }
+        else { document.body.classList.remove('dark'); document.body.classList.add('light'); document.getElementById('themeToggle').innerText='🌙'; }
+        localStorage.setItem('theme', theme);
     }
     applyTheme();
-    document.getElementById('themeToggle').addEventListener('click', () => { currentTheme = currentTheme === 'dark' ? 'light' : 'dark'; applyTheme(); });
+    document.getElementById('themeToggle').onclick = () => { theme = theme==='dark'?'light':'dark'; applyTheme(); };
 
     async function api(url, method='GET', body=null) {
-        const opts = { method };
-        if (body) {
-            opts.body = body;
-            opts.headers = {'Content-Type':'application/x-www-form-urlencoded'};
-        }
-        const res = await fetch(url, opts);
-        if (!res.ok) throw new Error(await res.text());
+        let opts = { method };
+        if(body) { opts.body = body; opts.headers = {'Content-Type':'application/x-www-form-urlencoded'}; }
+        let res = await fetch(url, opts);
+        if(!res.ok) throw new Error(await res.text());
         return res.json();
     }
 
     async function login(email, password) {
-        const form = new URLSearchParams({email,password});
+        let form = new URLSearchParams({email,password});
         await api('/api/login','POST',form);
         await loadUser();
     }
@@ -347,73 +316,68 @@ def index():
     async function loadUser() {
         try {
             currentUser = await api('/api/me');
-            document.getElementById('userPanel').innerHTML = `<span class="font-medium text-gray-700">${currentUser.name}</span> <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">${currentUser.role}</span> <button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm transition" onclick="logout()">Выйти</button>`;
+            document.getElementById('userPanel').innerHTML = `<span>${currentUser.name}</span> <span class="bg-gray-200 px-2 rounded-full">${currentUser.role}</span> <button class="bg-red-50 text-red-600 px-3 py-1 rounded-full" onclick="logout()">Выйти</button>`;
             renderUI();
-        } catch(e) { currentUser = null; renderLogin(); }
+        } catch(e) { currentUser=null; renderLogin(); }
     }
 
-    async function logout() { await api('/api/logout','POST'); currentUser = null; renderLogin(); }
-
-    function showSkeleton() {
-        document.getElementById('app').innerHTML = `<div class="space-y-4"><div class="h-32 bg-gray-100 rounded-2xl animate-pulse"></div><div class="h-32 bg-gray-100 rounded-2xl animate-pulse"></div></div>`;
-    }
+    async function logout() { await api('/api/logout','POST'); currentUser=null; renderLogin(); }
 
     function renderLogin() {
         document.getElementById('app').innerHTML = `
-            <div class="max-w-md mx-auto card p-8">
-                <h2 class="text-2xl font-bold mb-4 text-gray-800">Вход</h2>
-                <form id="loginForm" class="space-y-4">
-                    <div><label class="block text-sm text-gray-600">Email</label><input id="email" type="email" class="w-full"></div>
-                    <div><label class="block text-sm text-gray-600">Пароль</label><input id="password" type="password" class="w-full"></div>
-                    <button type="submit" class="w-full btn-primary py-2 transition">Войти</button>
+            <div class="card max-w-md mx-auto">
+                <h2>Вход</h2>
+                <form id="loginForm">
+                    <div><label>Email</label><input id="email" type="email"></div>
+                    <div><label>Пароль</label><input id="password" type="password"></div>
+                    <button type="submit" class="btn-primary">Войти</button>
                 </form>
-                <hr class="my-6 border-gray-200">
-                <h3 class="text-xl font-semibold mb-4 text-gray-800">Регистрация</h3>
-                <form id="registerForm" class="space-y-4">
-                    <div><label class="block text-sm text-gray-600">Email</label><input id="regEmail" type="email" class="w-full"></div>
-                    <div><label class="block text-sm text-gray-600">ФИО</label><input id="regName" class="w-full"></div>
-                    <div><label class="block text-sm text-gray-600">Пароль</label><input id="regPassword" type="password" class="w-full"></div>
-                    <div><label class="block text-sm text-gray-600">Роль</label><select id="regRole" class="w-full"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></div>
-                    <button type="submit" class="w-full btn-primary py-2 transition">Зарегистрироваться</button>
+                <hr>
+                <h3>Регистрация</h3>
+                <form id="registerForm">
+                    <div><label>Email</label><input id="regEmail" type="email"></div>
+                    <div><label>ФИО</label><input id="regName"></div>
+                    <div><label>Пароль</label><input id="regPassword" type="password"></div>
+                    <div><label>Роль</label><select id="regRole"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></div>
+                    <button type="submit" class="btn-primary">Зарегистрироваться</button>
                 </form>
             </div>
         `;
-        document.getElementById('loginForm').onsubmit = async (e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch { notyf.error('Ошибка входа'); } };
-        document.getElementById('registerForm').onsubmit = async (e) => { e.preventDefault(); const form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value, role:e.target.regRole.value }); await fetch('/api/register',{method:'POST',body:form}); notyf.success('Регистрация успешна'); };
+        document.getElementById('loginForm').onsubmit = async (e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch(e) { notyf.error('Ошибка входа'); } };
+        document.getElementById('registerForm').onsubmit = async (e) => { e.preventDefault(); let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value, role:e.target.regRole.value }); await fetch('/api/register',{method:'POST',body:form}); notyf.success('Регистрация успешна'); };
     }
 
     async function renderUI() {
-        if (!currentUser) return;
-        showSkeleton();
+        if(!currentUser) return;
         let tabs = [];
-        if (currentUser.role === 'client') tabs = ['Мои заявки', 'Новая заявка'];
-        else if (currentUser.role === 'operator') tabs = ['Все заявки', 'Экспорт'];
-        else if (currentUser.role === 'admin') tabs = ['Пользователи', 'Дашборд', 'Экспорт'];
-        else if (currentUser.role === 'quality') tabs = ['Дашборд', 'Экспорт'];
-        let html = `<div class="flex gap-2 mb-6 border-b pb-2">${tabs.map((t,i)=>`<button class="tab-btn px-4 py-2 rounded-full ${i===0?'active bg-gray-900 text-white':''}" data-tab="${i}">${t}</button>`).join('')}</div><div id="panes"></div>`;
+        if(currentUser.role === 'client') tabs = ['Мои заявки', 'Новая заявка'];
+        else if(currentUser.role === 'operator') tabs = ['Все заявки', 'Экспорт'];
+        else if(currentUser.role === 'admin') tabs = ['Пользователи', 'Дашборд', 'Экспорт'];
+        else if(currentUser.role === 'quality') tabs = ['Дашборд', 'Экспорт'];
+        let html = `<div class="flex gap-2 mb-4">${tabs.map((t,i)=>`<button class="tab-btn px-3 py-1 rounded-full ${i===0?'active':''}" data-tab="${i}">${t}</button>`).join('')}</div><div id="panes"></div>`;
         document.getElementById('app').innerHTML = html;
-        const panes = document.getElementById('panes');
-        for (let i=0;i<tabs.length;i++) {
-            const pane = document.createElement('div'); pane.className = `tab-pane ${i===0?'block':'hidden'}`; pane.id = `pane-${i}`;
-            panes.appendChild(pane);
-            if (currentUser.role === 'client') {
-                if (tabs[i]==='Мои заявки') await renderClientTickets(pane);
-                if (tabs[i]==='Новая заявка') renderNewTicket(pane);
-            } else if (currentUser.role === 'operator') {
-                if (tabs[i]==='Все заявки') await renderOperatorTickets(pane);
-                if (tabs[i]==='Экспорт') renderExport(pane);
-            } else if (currentUser.role === 'admin') {
-                if (tabs[i]==='Пользователи') await renderAdminUsers(pane);
-                if (tabs[i]==='Дашборд') await renderDashboard(pane);
-                if (tabs[i]==='Экспорт') renderExport(pane);
-            } else if (currentUser.role === 'quality') {
-                if (tabs[i]==='Дашборд') await renderDashboard(pane);
-                if (tabs[i]==='Экспорт') renderExport(pane);
+        let panesDiv = document.getElementById('panes');
+        for(let i=0;i<tabs.length;i++) {
+            let pane = document.createElement('div'); pane.className = `tab-pane ${i===0?'block':'hidden'}`; pane.id = `pane-${i}`;
+            panesDiv.appendChild(pane);
+            if(currentUser.role === 'client') {
+                if(tabs[i]==='Мои заявки') await renderClientTickets(pane);
+                if(tabs[i]==='Новая заявка') renderNewTicket(pane);
+            } else if(currentUser.role === 'operator') {
+                if(tabs[i]==='Все заявки') await renderOperatorTickets(pane);
+                if(tabs[i]==='Экспорт') renderExport(pane);
+            } else if(currentUser.role === 'admin') {
+                if(tabs[i]==='Пользователи') await renderAdminUsers(pane);
+                if(tabs[i]==='Дашборд') await renderDashboard(pane);
+                if(tabs[i]==='Экспорт') renderExport(pane);
+            } else if(currentUser.role === 'quality') {
+                if(tabs[i]==='Дашборд') await renderDashboard(pane);
+                if(tabs[i]==='Экспорт') renderExport(pane);
             }
         }
         document.querySelectorAll('.tab-btn').forEach((btn,idx)=>btn.onclick=()=>{
-            document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active','bg-gray-900','text-white'));
-            btn.classList.add('active','bg-gray-900','text-white');
+            document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+            btn.classList.add('active');
             document.querySelectorAll('.tab-pane').forEach(p=>p.classList.add('hidden'));
             document.getElementById(`pane-${idx}`).classList.remove('hidden');
         });
@@ -421,170 +385,90 @@ def index():
 
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card overflow-hidden"><table class="w-full table-optim"><thead><tr><th class="p-3 text-left">ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th>Действие</th></tr></thead><tbody>`;
-        for (let t of data.tickets) {
-            let reviewHtml = t.review ? `<div class="max-w-xs text-xs text-gray-500">${t.review.substring(0,50)}${t.review.length>50?'…':''}</div>` : '—';
-            let actionBtn = '';
-            if (t.status === 'resolved' && !t.satisfaction) {
-                actionBtn = `<button class="bg-green-50 text-green-600 hover:bg-green-100 px-3 py-1 rounded-full text-sm" onclick="openReviewModal(${t.id})">Оценить</button>`;
-            }
-            html += `<tr class="border-b"><td class="p-3">${t.id}${t.review?.'<\/td>'...
+        let html = `<div class="card"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>`;
+        for(let t of data.tickets) {
+            let act = '';
+            if(t.status==='resolved' && !t.satisfaction) act = `<button class="bg-green-600 text-white px-2 py-1 rounded" onclick="openReview(${t.id})">Оценить</button>`;
+            html += `<tr><td>${t.id}</td><td>${t.title}</td><td><span class="status-badge status-${t.status}">${t.status}</span></td><td>${t.priority}</td><td>${new Date(t.created_at).toLocaleDateString()}</td><td>${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td>${t.review?t.review.substring(0,50):'—'}</td><td>${act}</td></tr>`;
         }
-        html += `</tbody></td></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
-
-        window.openReviewModal = (id) => {
-            const modalHtml = `
-                <div id="reviewModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-                    <div class="bg-white rounded-2xl p-6 w-full max-w-md">
-                        <h3 class="text-xl font-bold mb-4">Оцените качество обслуживания</h3>
-                        <div class="flex justify-center gap-2 mb-4" id="starRating">${[1,2,3,4,5].map(v => `<span class="star text-3xl cursor-pointer text-gray-400 hover:text-yellow-400 transition" data-value="${v}">★</span>`).join('')}</div>
-                        <textarea id="reviewText" rows="3" class="w-full border border-gray-300 rounded-lg p-2 mb-4" placeholder="Ваш отзыв (необязательно)"></textarea>
-                        <div class="flex justify-end gap-2">
-                            <button class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg" onclick="closeModal()">Отмена</button>
-                            <button class="bg-green-600 text-white px-4 py-2 rounded-lg" onclick="submitReview(${id})">Отправить</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-            document.querySelectorAll('.star').forEach(star => {
-                star.addEventListener('click', () => {
-                    document.querySelectorAll('.star').forEach(s => s.classList.remove('text-yellow-400', 'text-gray-400'));
-                    star.classList.add('text-yellow-400');
-                    star.style.color = '#facc15';
-                    window.selectedRating = parseInt(star.dataset.value);
-                });
-            });
-        };
-        window.closeModal = () => { document.getElementById('reviewModal')?.remove(); };
-        window.submitReview = async (id) => {
-            const rating = window.selectedRating;
-            const review = document.getElementById('reviewText')?.value || '';
-            if (!rating) { notyf.error('Выберите оценку'); return; }
-            await api(`/api/tickets/${id}?satisfaction=${rating}&review=${encodeURIComponent(review)}`, 'PUT');
-            notyf.success('Спасибо за отзыв!');
-            closeModal();
-            renderUI();
+        window.openReview = async (id) => {
+            let val = prompt("Оценка (1-5):",5);
+            if(val && val>=1 && val<=5) {
+                let rev = prompt("Ваш отзыв (необязательно):","");
+                await api(`/api/tickets/${id}?satisfaction=${val}&review=${encodeURIComponent(rev||'')}`,'PUT');
+                notyf.success('Спасибо за отзыв!');
+                renderUI();
+            }
         };
     }
 
     function renderNewTicket(container) {
-        container.innerHTML = `
-            <div class="card p-6">
-                <h3 class="text-xl font-semibold mb-4 text-gray-800">➕ Новая заявка</h3>
-                <form id="newTicketForm" class="space-y-4">
-                    <div><label class="block text-sm text-gray-600 mb-1">Название</label><input type="text" id="newTitle" class="w-full" required></div>
-                    <div><label class="block text-sm text-gray-600 mb-1">Описание</label><textarea id="newDesc" rows="3" class="w-full"></textarea></div>
-                    <div><label class="block text-sm text-gray-600 mb-1">Приоритет</label><select id="newPriority" class="w-full"><option value="low">Низкий</option><option value="medium" selected>Средний</option><option value="high">Высокий</option><option value="critical">Критический</option></select></div>
-                    <button type="submit" class="btn-primary px-4 py-2 rounded-lg transition">Создать заявку</button>
-                </form>
-            </div>
-        `;
-        const form = document.getElementById('newTicketForm');
-        form.addEventListener('submit', async (e) => {
+        container.innerHTML = `<div class="card"><h3>Новая заявка</h3><form id="newForm"><div><label>Название</label><input id="title" required></div><div><label>Описание</label><textarea id="desc" rows="3"></textarea></div><div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div><button class="btn-primary" type="submit">Создать</button></form></div>`;
+        document.getElementById('newForm').onsubmit = async (e) => {
             e.preventDefault();
-            const title = document.getElementById('newTitle').value.trim();
-            const description = document.getElementById('newDesc').value.trim();
-            const priority = document.getElementById('newPriority').value;
-            if (!title) { notyf.error('Введите название заявки'); return; }
-            try {
-                const body = new URLSearchParams({ title, description, priority });
-                const resp = await fetch('/api/tickets', { method: 'POST', body });
-                if (resp.ok) {
-                    notyf.success('Заявка создана');
-                    document.getElementById('newTitle').value = '';
-                    document.getElementById('newDesc').value = '';
-                    const myTicketsBtn = document.querySelector('.tab-btn[data-tab="0"]');
-                    if (myTicketsBtn) myTicketsBtn.click();
-                    else renderUI();
-                } else { notyf.error('Ошибка создания'); }
-            } catch(err) { notyf.error('Ошибка соединения'); }
-        });
-    }
-
-    async function renderOperatorTickets(container) {
-        let data = await api('/api/tickets');
-        let html = `<div class="card overflow-hidden"><table class="w-full table-optim"><thead><tr><th class="p-3">ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
-        for (let t of data.tickets) {
-            html += `<tr class="border-b"><td class="p-3">${t.id}${t.review?.'<\/td>'...
-        }
-        html += `</tbody></table></div>`;
-        container.innerHTML = html;
-
-        window.assignTicket = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); notyf.success('Заявка принята'); renderUI(); };
-        window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`,'PUT'); notyf.success('Заявка закрыта'); renderUI(); };
-        window.openResolveModal = (id) => {
-            const modalHtml = `
-                <div id="resolveModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-                    <div class="bg-white rounded-2xl p-6 w-full max-w-md">
-                        <h3 class="text-xl font-bold mb-4">Решение заявки №${id}</h3>
-                        <textarea id="resolveComment" rows="4" class="w-full border border-gray-300 rounded-lg p-2 mb-4" placeholder="Опишите выполненное решение..."></textarea>
-                        <div class="flex justify-end gap-2">
-                            <button class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg" onclick="closeResolveModal()">Отмена</button>
-                            <button class="bg-green-600 text-white px-4 py-2 rounded-lg" onclick="resolveWithComment(${id})">Подтвердить решение</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-        };
-        window.closeResolveModal = () => { document.getElementById('resolveModal')?.remove(); };
-        window.resolveWithComment = async (id) => {
-            const comment = document.getElementById('resolveComment')?.value || '';
-            await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(comment)}`, 'PUT');
-            notyf.success('Заявка решена, комментарий сохранён');
-            closeResolveModal();
+            let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value });
+            await api('/api/tickets','POST',body);
+            notyf.success('Заявка создана');
             renderUI();
         };
     }
 
+    async function renderOperatorTickets(container) {
+        let data = await api('/api/tickets');
+        let html = `<div class="card"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
+        for(let t of data.tickets) {
+            let actions = '';
+            if(t.status==='new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded" onclick="assign(${t.id})">Принять</button>`;
+            if(t.status==='in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded" onclick="respond(${t.id})">Ответить</button>`;
+            if(t.status==='resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded" onclick="closeTicket(${t.id})">Закрыть</button>`;
+            html += `<tr><td>${t.id}</td><td>${t.title}</td><td><span class="status-badge status-${t.status}">${t.status}</span></td><td>${t.priority}</td><td>${actions}</td></tr>`;
+        }
+        html += `</tbody></table></div>`;
+        container.innerHTML = html;
+        window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
+        window.resolve = async (id) => { await api(`/api/tickets/${id}?status=resolved`,'PUT'); renderUI(); };
+        window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`,'PUT'); renderUI(); };
+        window.respond = async (id) => { let msg = prompt("Введите ответ:"); if(msg) alert("Ответ отправлен (демо)"); };
+    }
+
     function renderExport(container) {
-        container.innerHTML = `<div class="card p-6"><h3 class="text-xl font-semibold mb-4 text-gray-800">📎 Экспорт данных</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary px-4 py-2 rounded-lg transition">Скачать заявки CSV</button></a></div>`;
+        container.innerHTML = `<div class="card"><h3>Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`;
     }
 
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = `<div class="card overflow-hidden"><h3 class="text-xl font-semibold p-4 text-gray-800">👥 Управление пользователями</h3><table class="w-full table-optim"><thead><tr><th class="p-3">ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th>Действия</th></td></thead><tbody>`;
-        for (let u of users) {
-            html += `<tr class="border-b"><td class="p-3">${u.id}${u.review?.'<\/td>'...
+        let html = `<div class="card"><h3>Пользователи</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>Имя</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>`;
+        for(let u of users) {
+            html += `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.full_name}</td><td>${u.role}</td><td><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td><button class="bg-blue-600 text-white px-2 py-1 rounded" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
-        window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
-        window.deleteUser = async (id) => {
-            if (!confirm('Вы уверены, что хотите удалить этого пользователя?')) return;
-            try {
-                await fetch(`/api/users/${id}`, { method: 'DELETE' });
-                notyf.success('Пользователь удалён');
-                renderAdminUsers(container);
-                if (id === currentUser.id) await logout();
-            } catch(e) { notyf.error('Ошибка удаления'); }
-        };
+        window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); renderAdminUsers(container); };
+        window.delUser = async (id) => { if(confirm('Удалить?')) { await fetch(`/api/users/${id}`,{method:'DELETE'}); renderAdminUsers(container); } };
     }
 
     async function renderDashboard(container) {
         let m = await api('/api/dashboard/metrics');
-        const statusLabels = Object.keys(m.status_counts);
-        const statusData = Object.values(m.status_counts);
-        const dailyLabels = m.daily_labels;
-        const dailyData = m.daily_data;
-        container.innerHTML = `<div class="card p-6"><h3 class="text-xl font-semibold mb-4 text-gray-800">📊 Дашборд качества</h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <div class="bg-gray-50 p-4 rounded-xl"><div class="text-sm text-gray-500">Всего заявок</div><div class="text-3xl font-bold text-gray-800">${m.total_tickets}</div></div>
-            <div class="bg-gray-50 p-4 rounded-xl"><div class="text-sm text-gray-500">Решено/закрыто</div><div class="text-3xl font-bold text-gray-800">${m.resolved_tickets}</div></div>
-            <div class="bg-gray-50 p-4 rounded-xl"><div class="text-sm text-gray-500">Средний CSAT</div><div class="text-3xl font-bold text-gray-800">${m.avg_csat}/5</div></div>
+        let statusLabels = Object.keys(m.status_counts);
+        let statusData = Object.values(m.status_counts);
+        let dailyLabels = m.daily_labels;
+        let dailyData = m.daily_data;
+        container.innerHTML = `<div class="card"><h3>Дашборд качества</h3>
+        <div class="grid grid-cols-3 gap-4 mb-4">
+            <div class="bg-gray-100 p-3 rounded"><b>Всего заявок</b><br><span class="text-2xl">${m.total_tickets}</span></div>
+            <div class="bg-gray-100 p-3 rounded"><b>Решено/закрыто</b><br><span class="text-2xl">${m.resolved_tickets}</span></div>
+            <div class="bg-gray-100 p-3 rounded"><b>Средний CSAT</b><br><span class="text-2xl">${m.avg_csat}/5</span></div>
         </div>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div class="bg-gray-50 p-4 rounded-xl"><canvas id="statusChart" height="200"></canvas></div>
-            <div class="bg-gray-50 p-4 rounded-xl"><canvas id="trendChart" height="200"></canvas></div>
+        <div class="grid grid-cols-2 gap-4">
+            <div><canvas id="statusChart"></canvas></div>
+            <div><canvas id="trendChart"></canvas></div>
         </div></div>`;
         setTimeout(() => {
-            const statusCtx = document.getElementById('statusChart').getContext('2d');
-            new Chart(statusCtx, { type: 'pie', data: { labels: statusLabels, datasets: [{ data: statusData, backgroundColor: ['#facc15', '#3b82f6', '#22c55e', '#64748b'] }] }, options: { responsive: true, maintainAspectRatio: true } });
-            const trendCtx = document.getElementById('trendChart').getContext('2d');
-            new Chart(trendCtx, { type: 'line', data: { labels: dailyLabels, datasets: [{ label: 'Заявки', data: dailyData, borderColor: '#15803d', fill: false }] }, options: { responsive: true } });
-        }, 100);
+            new Chart(document.getElementById('statusChart'), { type:'pie', data:{ labels:statusLabels, datasets:[{ data:statusData, backgroundColor:['#facc15','#3b82f6','#22c55e','#64748b'] }] } });
+            new Chart(document.getElementById('trendChart'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#15803d' }] } });
+        },100);
     }
 
     loadUser();
@@ -596,5 +480,5 @@ def index():
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
-    print(f"\n🚀 Сервер Оптимасеть запущен на порту {port}")
+    print(f"\n🚀 Сервер запущен на порту {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
