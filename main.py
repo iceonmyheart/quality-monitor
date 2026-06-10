@@ -164,7 +164,7 @@ def get_tickets(session: str = Cookie(None), page: int = 1, limit: int = 10,
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     offset = (page - 1) * limit
-    query = "SELECT * FROM tickets WHERE 1=1"
+    query = "SELECT id, title, description, status, priority, category, created_at, satisfaction, review, assigned_to_id, created_by_id FROM tickets WHERE 1=1"
     params = []
     if user["role"] == "client":
         query += " AND created_by_id = ?"
@@ -181,14 +181,20 @@ def get_tickets(session: str = Cookie(None), page: int = 1, limit: int = 10,
     if search:
         query += " AND (title LIKE ? OR description LIKE ?)"
         params.extend([f"%{search}%", f"%{search}%"])
-    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    count_query = query.replace("SELECT id, title, description, status, priority, category, created_at, satisfaction, review, assigned_to_id, created_by_id", "SELECT COUNT(*)")
     c.execute(count_query, params)
     total = c.fetchone()[0]
     query += " ORDER BY id DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     c.execute(query, params)
-    tickets = [{"id": row[0], "title": row[1], "status": row[3], "priority": row[4],
-                "created_at": row[6], "satisfaction": row[10]} for row in c.fetchall()]
+    tickets = []
+    for row in c.fetchall():
+        tickets.append({
+            "id": row[0], "title": row[1], "description": row[2], "status": row[3],
+            "priority": row[4], "category": row[5], "created_at": row[6],
+            "satisfaction": row[7], "review": row[8], "assigned_to_id": row[9],
+            "created_by_id": row[10]
+        })
     conn.close()
     return {"tickets": tickets, "total": total, "page": page, "limit": limit}
 
@@ -228,13 +234,16 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
         if status == "resolved":
             updates.append("resolved_at=?")
             params.append(datetime.now().isoformat())
-            if ticket_id:
-                c.execute("SELECT created_at FROM tickets WHERE id=?", (ticket_id,))
-                created = c.fetchone()[0]
-                if created:
-                    mins = (datetime.now() - datetime.fromisoformat(created)).total_seconds() / 60
-                    updates.append("resolution_time_minutes=?")
-                    params.append(int(mins))
+            # calculate resolution time
+            c.execute("SELECT created_at FROM tickets WHERE id=?", (ticket_id,))
+            created = c.fetchone()[0]
+            if created:
+                mins = (datetime.now() - datetime.fromisoformat(created)).total_seconds() / 60
+                updates.append("resolution_time_minutes=?")
+                params.append(int(mins))
+        if status == "closed":
+            updates.append("closed_at=?")
+            params.append(datetime.now().isoformat())
     if assigned_to_id:
         updates.append("assigned_to_id=?")
         params.append(assigned_to_id)
@@ -358,7 +367,6 @@ def dashboard_metrics(session: str = Cookie(None)):
     daily = dict(c.fetchall())
     labels = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
     data = [daily.get(d, 0) for d in labels]
-    # SLA compliance
     c.execute("SELECT COUNT(*) FROM tickets WHERE first_response_at IS NOT NULL")
     total_responded = c.fetchone()[0] or 0
     if total_responded > 0:
@@ -487,13 +495,12 @@ def export_tickets(session: str = Cookie(None)):
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID", "Title", "Status", "Priority", "Created", "Satisfaction", "Review"])
+    writer.writerow(["ID", "Title", "Status", "Priority", "Created", "Satisfaction", "OperatorComment"])
     for r in rows:
         writer.writerow([r[0], r[1], r[2], r[3], r[4], r[5] if r[5] else "", r[6] or ""])
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
-# ---------------------------------------- HTML (фронтенд) ----------------------------------------
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -642,14 +649,25 @@ def index():
     // ---------------------------- Рендеры ----------------------------
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Ответ оператора</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>';
         for(let t of data.tickets) {
-            let reviewShort = t.review ? t.review.substring(0,50)+(t.review.length>50?'…':'') : '—';
+            let reviewShort = t.review ? t.review.substring(0,60)+(t.review.length>60?'…':'') : '—';
             let actionBtn = '';
             if(t.status === 'resolved' && !t.satisfaction) {
                 actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить качество</button>`;
             }
-            html += `<tr><td data-label="Номер заявки">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td><td data-label="Отзыв">${reviewShort}</td><td data-label="Действие">${actionBtn}</td></tr>`;
+            html += `<tr>
+                <td data-label="Номер">${t.id}</td>
+                <td data-label="Название">${t.title}</td>
+                <td data-label="Описание">${t.description ? t.description.substring(0,40)+(t.description.length>40?'…':'') : '—'}</td>
+                <td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td>
+                <td data-label="Приоритет">${t.priority}</td>
+                <td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td>
+                <td data-label="Ответ оператора">${reviewShort}</td>
+                <td data-label="Оценка">${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td>
+                <td data-label="Отзыв">${t.review ? t.review.substring(0,40) : '—'}</td>
+                <td data-label="Действие">${actionBtn}</td>
+            </tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -734,20 +752,36 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
             if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr><td data-label="Номер заявки">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия">${actions}</td></tr>`;
+            html += `<tr>
+                <td data-label="Номер">${t.id}</td>
+                <td data-label="Название">${t.title}</td>
+                <td data-label="Описание">${t.description ? t.description.substring(0,40)+(t.description.length>40?'…':'') : '—'}</td>
+                <td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td>
+                <td data-label="Приоритет">${t.priority}</td>
+                <td data-label="Действия">${actions}</td>
+            </tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`, 'PUT'); renderUI(); };
-        window.resolve = async (id) => { let rev=prompt("Введите комментарий к решению:"); await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev||'')}`, 'PUT'); renderUI(); };
+        window.resolve = async (id) => { 
+            let comment = prompt("Введите ответ/решение, который увидит клиент:");
+            if(comment !== null) {
+                await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(comment||'')}`, 'PUT');
+                notyf.success('Заявка решена, ответ отправлен');
+            } else {
+                await api(`/api/tickets/${id}?status=resolved`, 'PUT');
+            }
+            renderUI(); 
+        };
         window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`, 'PUT'); renderUI(); };
-        window.respond = async (id) => { let msg = prompt("Введите ответ по заявке:"); if(msg) notyf.success("Ответ отправлен"); };
+        window.respond = async (id) => { let msg = prompt("Введите промежуточный ответ (будет виден клиенту):"); if(msg) { await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`, 'PUT'); notyf.success("Ответ сохранён"); renderUI(); } };
     }
 
     function renderExport(container) {
@@ -853,7 +887,7 @@ def index():
             document.getElementById('politenessAvg').innerText = data.politeness_avg;
             let tableHtml = '';
             for(let op of data.operator_stats) {
-                tableHtml += `<tr><td>${op.name}</td><td>${op.count}</td><td>${op.overall_avg}</td><td>${op.speed_avg}</td><td>${op.prof_avg}</td><td>${op.politeness_avg}</td></tr>`;
+                tableHtml += `<tr><td data-label="Оператор">${op.name}</td><td data-label="Оценок">${op.count}</td><td data-label="Общая">${op.overall_avg}</td><td data-label="Скорость">${op.speed_avg}</td><td data-label="Проф.">${op.prof_avg}</td><td data-label="Вежливость">${op.politeness_avg}</td></tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
             const ctx = document.getElementById('operatorChart').getContext('2d');
