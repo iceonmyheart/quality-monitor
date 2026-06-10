@@ -40,7 +40,7 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_created_by ON tickets(created_by_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_assigned_to ON tickets(assigned_to_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at)")
-    # Предустановленные пользователи удалены – только пустые таблицы
+    # Предустановленные пользователи удалены – регистрируйтесь сами
     conn.commit()
     conn.close()
 
@@ -420,6 +420,7 @@ def index():
         });
     }
 
+    // Клиентские функции
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
         let html = `<div class="card overflow-hidden"><table class="w-full table-optim"><thead><tr><th class="p-3 text-left">ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th>Действие</th></tr></thead><tbody>`;
@@ -429,7 +430,7 @@ def index():
             if (t.status === 'resolved' && !t.satisfaction) {
                 actionBtn = `<button class="bg-green-50 text-green-600 hover:bg-green-100 px-3 py-1 rounded-full text-sm" onclick="openReviewModal(${t.id})">Оценить</button>`;
             }
-            html += `<tr class="border-b"><td class="p-3">${t.id}</td><td class="p-3">${t.title}</td><td class="p-3"><span class="status-badge status-${t.status}">${t.status}</span></td><td class="p-3">${t.priority}</td><td class="p-3">${new Date(t.created_at).toLocaleDateString()}</td><td class="p-3">${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td><td class="p-3">${reviewHtml}</td><td class="p-3">${actionBtn}</td></tr>`;
+            html += `<tr class="border-b"><td class="p-3">${t.id}${t.review?.'<\/td>'...
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -506,13 +507,9 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card overflow-hidden"><table class="w-full table-optim"><thead><tr><th class="p-3">ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
+        let html = `<div class="card overflow-hidden"><table class="w-full table-optim"><thead><td><th class="p-3">ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
         for (let t of data.tickets) {
-            html += `<tr class="border-b"><td class="p-3">${t.id}</td><td class="p-3">${t.title}</td><td class="p-3"><span class="status-badge status-${t.status}">${t.status}</span></td><td class="p-3">${t.priority}</td><td class="p-3 space-x-2">
-                ${t.status==='new'?`<button class="bg-yellow-50 text-yellow-600 hover:bg-yellow-100 px-3 py-1 rounded-full text-sm" onclick="assignTicket(${t.id})">Принять</button>`:''}
-                ${t.status==='in_progress'?`<button class="bg-green-50 text-green-600 hover:bg-green-100 px-3 py-1 rounded-full text-sm" onclick="openResolveModal(${t.id})">Решить</button>`:''}
-                ${t.status==='resolved'?`<button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`:''}
-            </td></tr>`;
+            html += `<tr class="border-b"><td class="p-3">${t.id}${t.review?.'<\/td>'...
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -552,9 +549,7 @@ def index():
         let users = await api('/api/users');
         let html = `<div class="card overflow-hidden"><h3 class="text-xl font-semibold p-4 text-gray-800">👥 Управление пользователями</h3><table class="w-full table-optim"><thead><tr><th class="p-3">ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th>Действия</th></tr></thead><tbody>`;
         for (let u of users) {
-            html += `<tr class="border-b"><td class="p-3">${u.id}</td><td class="p-3">${u.email}</td><td class="p-3">${u.full_name}</td><td class="p-3">${u.role}</td><td class="p-3"><select id="role-${u.id}" class="bg-gray-50 border border-gray-300 rounded p-1 text-sm"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td>
-            <td class="p-3 space-x-2"><button class="bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1 rounded-full text-sm" onclick="changeRole(${u.id})">Изменить</button>
-            <button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm" onclick="deleteUser(${u.id})">Удалить</button></td></tr>`;
+            html += `<tr class="border-b"><td class="p-3">${u.id}${u.review?.'<\/td>'...
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -603,4 +598,5 @@ def index():
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
+    print(f"\n🚀 Сервер Оптимасеть запущен на порту {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
