@@ -40,14 +40,25 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_created_by ON tickets(created_by_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_assigned_to ON tickets(assigned_to_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at)")
+    
+    # Предустановленные пользователи
+    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin', 'admin', datetime('now'))")
+    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator', 'operator', datetime('now'))")
+    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality', 'quality', datetime('now'))")
+    
     conn.commit()
     conn.close()
 
 init_db()
 sessions = {}
 
+# Заранее заданные адреса, которые нельзя использовать при регистрации
+RESERVED_EMAILS = ["admin@mail.ru", "operator@mail.ru", "quality@mail.ru"]
+
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...)):
+    if email in RESERVED_EMAILS:
+        raise HTTPException(400, "Этот email зарезервирован, выберите другой")
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     try:
@@ -451,14 +462,14 @@ def index():
 
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></table></thead><tbody>';
         for(let t of data.tickets) {
             let reviewShort = t.review ? t.review.substring(0,50) + (t.review.length>50?'…':'') : '—';
             let actionBtn = '';
             if(t.status === 'resolved' && !t.satisfaction) {
                 actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openReview(${t.id})">Оценить</button>`;
             }
-            html += `<tr>
+            html += `<td>
                 <td data-label="Номер заявки">${t.id}</td>
                 <td data-label="Название">${t.title}</td>
                 <td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td>
@@ -505,7 +516,7 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></td></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
