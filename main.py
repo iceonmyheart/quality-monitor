@@ -16,7 +16,6 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 def init_db():
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
-    # Таблицы
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE,
@@ -39,7 +38,9 @@ def init_db():
         satisfaction INTEGER,
         review TEXT,
         assigned_to_id INTEGER,
-        created_by_id INTEGER
+        created_by_id INTEGER,
+        response_time_minutes INTEGER,
+        resolution_time_minutes INTEGER
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS detailed_reviews (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +89,6 @@ def init_db():
         category_id INTEGER,
         created_at TEXT
     )''')
-    # Начальные данные
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Технические проблемы')")
@@ -96,7 +96,6 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
-    # Предустановленные пользователи
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
@@ -106,7 +105,7 @@ def init_db():
 init_db()
 sessions = {}
 
-# ---------------------------- API ----------------------------
+# ---------------------------------------- API ----------------------------------------
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...)):
     if email == "admin@mail.ru":
@@ -224,12 +223,18 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
             assigned_to_id = user["id"]
             updates.append("first_response_at=?")
             params.append(datetime.now().isoformat())
+            updates.append("response_time_minutes=?")
+            params.append(0)
         if status == "resolved":
             updates.append("resolved_at=?")
             params.append(datetime.now().isoformat())
-        if status == "closed":
-            updates.append("closed_at=?")
-            params.append(datetime.now().isoformat())
+            if ticket_id:
+                c.execute("SELECT created_at FROM tickets WHERE id=?", (ticket_id,))
+                created = c.fetchone()[0]
+                if created:
+                    mins = (datetime.now() - datetime.fromisoformat(created)).total_seconds() / 60
+                    updates.append("resolution_time_minutes=?")
+                    params.append(int(mins))
     if assigned_to_id:
         updates.append("assigned_to_id=?")
         params.append(assigned_to_id)
@@ -252,7 +257,6 @@ def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = F
                         comment: str = Form(""), session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
-    user = sessions[session]
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("INSERT INTO detailed_reviews (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at) VALUES (?,?,?,?,?,?,?)",
@@ -260,6 +264,17 @@ def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = F
     conn.commit()
     conn.close()
     return {"message": "OK"}
+
+@app.get("/api/tickets/{ticket_id}/detailed_review")
+def get_detailed_review(ticket_id: int):
+    conn = sqlite3.connect("monitoring.db")
+    c = conn.cursor()
+    c.execute("SELECT overall_rating, speed_rating, professionalism_rating, politeness_rating, comment FROM detailed_reviews WHERE ticket_id=? ORDER BY id DESC LIMIT 1", (ticket_id,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return {"overall": row[0], "speed": row[1], "professionalism": row[2], "politeness": row[3], "comment": row[4]}
+    return None
 
 @app.get("/api/dashboard/advanced_metrics")
 def advanced_metrics(period: str = "month", operator_id: int = None, category: str = None, session: str = Cookie(None)):
@@ -293,7 +308,8 @@ def advanced_metrics(period: str = "month", operator_id: int = None, category: s
     rows = c.fetchall()
     total = len(rows)
     if total == 0:
-        return {"overall_avg": 0, "speed_avg": 0, "prof_avg": 0, "politeness_avg": 0, "operator_stats": []}
+        conn.close()
+        return {"overall_avg": 0, "speed_avg": 0, "prof_avg": 0, "politeness_avg": 0, "operator_stats": [], "total_reviews": 0}
     overall_avg = sum(r[0] for r in rows) / total
     speed_avg = sum(r[1] for r in rows) / total
     prof_avg = sum(r[2] for r in rows) / total
@@ -322,6 +338,47 @@ def advanced_metrics(period: str = "month", operator_id: int = None, category: s
         "politeness_avg": round(politeness_avg, 2),
         "total_reviews": total,
         "operator_stats": operator_stats
+    }
+
+@app.get("/api/dashboard/metrics")
+def dashboard_metrics(session: str = Cookie(None)):
+    if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
+        raise HTTPException(403)
+    conn = sqlite3.connect("monitoring.db")
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM tickets")
+    total = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM tickets WHERE status IN ('resolved','closed')")
+    resolved = c.fetchone()[0]
+    c.execute("SELECT AVG(satisfaction) FROM tickets WHERE satisfaction IS NOT NULL")
+    avg_sat = c.fetchone()[0] or 0
+    c.execute("SELECT status, COUNT(*) FROM tickets GROUP BY status")
+    status_counts = dict(c.fetchall())
+    c.execute("SELECT DATE(created_at), COUNT(*) FROM tickets WHERE created_at >= DATE('now','-7 days') GROUP BY DATE(created_at)")
+    daily = dict(c.fetchall())
+    labels = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
+    data = [daily.get(d, 0) for d in labels]
+    # SLA compliance
+    c.execute("SELECT COUNT(*) FROM tickets WHERE first_response_at IS NOT NULL")
+    total_responded = c.fetchone()[0] or 0
+    if total_responded > 0:
+        c.execute("SELECT COUNT(*) FROM tickets WHERE first_response_at IS NOT NULL AND response_time_minutes <= 480")
+        compliant = c.fetchone()[0]
+        sla_compliance = round(compliant / total_responded * 100, 1)
+    else:
+        sla_compliance = 100.0
+    c.execute("SELECT AVG(resolution_time_minutes) FROM tickets WHERE resolution_time_minutes IS NOT NULL")
+    avg_res = c.fetchone()[0] or 0
+    conn.close()
+    return {
+        "total_tickets": total,
+        "resolved_tickets": resolved,
+        "avg_csat": round(avg_sat, 2),
+        "status_counts": status_counts,
+        "daily_labels": labels,
+        "daily_data": data,
+        "sla_compliance": sla_compliance,
+        "avg_resolution_minutes": round(avg_res, 0)
     }
 
 @app.get("/api/users")
@@ -419,34 +476,6 @@ def get_categories():
     conn.close()
     return cats
 
-@app.get("/api/dashboard/metrics")
-def dashboard_metrics(session: str = Cookie(None)):
-    if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
-        raise HTTPException(403)
-    conn = sqlite3.connect("monitoring.db")
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM tickets")
-    total = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM tickets WHERE status IN ('resolved','closed')")
-    resolved = c.fetchone()[0]
-    c.execute("SELECT AVG(satisfaction) FROM tickets WHERE satisfaction IS NOT NULL")
-    avg_sat = c.fetchone()[0] or 0
-    c.execute("SELECT status, COUNT(*) FROM tickets GROUP BY status")
-    status_counts = dict(c.fetchall())
-    c.execute("SELECT DATE(created_at), COUNT(*) FROM tickets WHERE created_at >= DATE('now','-7 days') GROUP BY DATE(created_at)")
-    daily = dict(c.fetchall())
-    labels = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
-    data = [daily.get(d, 0) for d in labels]
-    conn.close()
-    return {
-        "total_tickets": total,
-        "resolved_tickets": resolved,
-        "avg_csat": round(avg_sat, 2),
-        "status_counts": status_counts,
-        "daily_labels": labels,
-        "daily_data": data
-    }
-
 @app.get("/api/export/tickets")
 def export_tickets(session: str = Cookie(None)):
     if not session or session not in sessions:
@@ -464,6 +493,7 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
+# ---------------------------------------- HTML (фронтенд) ----------------------------------------
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -523,6 +553,7 @@ def index():
     let currentUser = null;
     let theme = localStorage.getItem('theme') || 'light';
     const notyf = new Notyf({ duration:3000, position:{x:'right',y:'top'} });
+
     function applyTheme() {
         if(theme === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); document.getElementById('themeToggle').innerText = '☀️'; }
         else { document.body.classList.remove('dark'); document.body.classList.add('light'); document.getElementById('themeToggle').innerText = '🌙'; }
@@ -530,6 +561,7 @@ def index():
     }
     applyTheme();
     document.getElementById('themeToggle').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; applyTheme(); };
+
     async function api(url, method='GET', body=null) {
         let opts = { method };
         if(body) { opts.body = body; opts.headers = {'Content-Type':'application/x-www-form-urlencoded'}; }
@@ -537,11 +569,13 @@ def index():
         if(!res.ok) throw new Error(await res.text());
         return res.json();
     }
+
     async function login(email, password) {
         let form = new URLSearchParams({email,password});
         await api('/api/login','POST',form);
         await loadUser();
     }
+
     async function loadUser() {
         try {
             currentUser = await api('/api/me');
@@ -549,7 +583,9 @@ def index():
             renderUI();
         } catch(e) { currentUser = null; renderLogin(); }
     }
+
     async function logout() { await api('/api/logout','POST'); currentUser = null; renderLogin(); }
+
     function renderLogin() {
         document.getElementById('app').innerHTML = `
             <div class="max-w-md mx-auto card"><h2 class="text-2xl font-bold mb-4">Вход</h2>
@@ -564,6 +600,7 @@ def index():
         document.getElementById('loginForm').onsubmit = async (e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch(e) { notyf.error('Ошибка входа'); } };
         document.getElementById('registerForm').onsubmit = async (e) => { e.preventDefault(); let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value }); await fetch('/api/register', { method:'POST', body:form }); notyf.success('Регистрация успешна, теперь войдите'); };
     }
+
     async function renderUI() {
         if(!currentUser) return;
         let tabs = [];
@@ -601,6 +638,8 @@ def index():
         }
         document.querySelectorAll('.tab-btn').forEach((btn,idx)=>btn.onclick=()=>{ document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.add('hidden')); document.getElementById(`pane-${idx}`).classList.remove('hidden'); });
     }
+
+    // ---------------------------- Рендеры ----------------------------
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
         let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>';
@@ -658,6 +697,7 @@ def index():
             renderUI();
         };
     }
+
     function renderNewTicket(container) {
         container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3>
         <form id="newForm" class="space-y-4">
@@ -665,26 +705,33 @@ def index():
             <div><label class="block text-sm font-medium">Описание</label><textarea id="desc" rows="3"></textarea></div>
             <div><label class="block text-sm font-medium">Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
             <div><label class="block text-sm font-medium">Категория</label><select id="category"></select></div>
-            <button type="submit" class="btn-primary">Создать</button>
+            <button type="submit" class="btn-primary">Создать заявку</button>
         </form></div>`;
-        fetch('/api/categories').then(r=>r.json()).then(cats=>{ let sel = document.getElementById('category'); cats.forEach(c=>{ let opt = document.createElement('option'); opt.value = c.name; opt.innerText = c.name; sel.appendChild(opt); }); });
+        fetch('/api/categories').then(r=>r.json()).then(cats=>{ let sel=document.getElementById('category'); cats.forEach(c=>{ let opt=document.createElement('option'); opt.value=c.name; opt.innerText=c.name; sel.appendChild(opt); }); });
         document.getElementById('newForm').onsubmit = async (e) => {
             e.preventDefault();
             let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value, category:document.getElementById('category').value });
-            await api('/api/tickets','POST',body);
+            await api('/api/tickets', 'POST', body);
             notyf.success('Заявка создана');
             renderUI();
         };
     }
+
     async function renderKnowledge(container) {
-        let arts = await api('/api/knowledge');
-        let html = `<div class="card"><h3 class="text-xl font-semibold mb-4">База знаний</h3><input type="text" id="kbSearch" placeholder="Поиск..." class="mb-4"><div id="kbList">${arts.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded mb-2"><b>${a.title}</b><br>${a.content}</div>`).join('')}</div></div>`;
+        let articles = await api('/api/knowledge');
+        let html = `<div class="card"><h3 class="text-xl font-semibold mb-4">База знаний</h3><input type="text" id="kbSearch" placeholder="Поиск..." class="mb-4">`;
+        html += articles.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg mb-2"><b>${a.title}</b><br>${a.content}</div>`).join('');
+        html += `</div>`;
         container.innerHTML = html;
         document.getElementById('kbSearch').addEventListener('input', async (e) => {
-            let res = await api(`/api/knowledge?search=${encodeURIComponent(e.target.value)}`);
-            document.getElementById('kbList').innerHTML = res.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded mb-2"><b>${a.title}</b><br>${a.content}</div>`).join('');
+            let arts = await api(`/api/knowledge?search=${encodeURIComponent(e.target.value)}`);
+            document.querySelector('#pane-2 .card .mb-4').nextSibling.remove();
+            let newDiv = document.createElement('div');
+            newDiv.innerHTML = arts.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg mb-2"><b>${a.title}</b><br>${a.content}</div>`).join('');
+            document.querySelector('#pane-2 .card').appendChild(newDiv);
         });
     }
+
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
         let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
@@ -698,14 +745,18 @@ def index():
         html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`, 'PUT'); renderUI(); };
-        window.resolve = async (id) => { await api(`/api/tickets/${id}?status=resolved`, 'PUT'); renderUI(); };
+        window.resolve = async (id) => { let rev=prompt("Введите комментарий к решению:"); await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev||'')}`, 'PUT'); renderUI(); };
         window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`, 'PUT'); renderUI(); };
-        window.respond = async (id) => { let msg = prompt("Введите ответ по заявке:"); if(msg) alert("Ответ отправлен (демо)"); };
+        window.respond = async (id) => { let msg = prompt("Введите ответ по заявке:"); if(msg) notyf.success("Ответ отправлен"); };
     }
-    function renderExport(container) { container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать заявки CSV</button></a></div>`; }
+
+    function renderExport(container) {
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать заявки CSV</button></a></div>`;
+    }
+
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Пользователи</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
             html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
@@ -714,40 +765,59 @@ def index():
         window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`, 'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
         window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await fetch(`/api/users/${id}`, { method:'DELETE' }); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
     }
+
     async function renderAdminSLA(container) {
         let sla = await api('/api/admin/sla');
-        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Настройки SLA</h3><div class="space-y-4"><div><label class="block">Время ответа High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}" class="w-full border rounded p-2"></div><div><label class="block">Время ответа Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}" class="w-full border rounded p-2"></div><button class="btn-primary" id="saveSla">Сохранить</button></div></div>`;
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Настройки SLA</h3>
+        <div class="space-y-4"><div><label>Время ответа для High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}"></div>
+        <div><label>Время ответа для Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}"></div>
+        <button class="btn-primary" id="saveSla">Сохранить</button></div></div>`;
         document.getElementById('saveSla').onclick = async () => { await api(`/api/admin/sla?response_high_hours=${document.getElementById('high').value}&response_medium_hours=${document.getElementById('medium').value}`, 'PUT'); notyf.success('Настройки сохранены'); };
     }
+
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
-        let html = `<div class="card"><h3 class="text-xl font-semibold mb-4">Логи системы</h3><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи системы</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
         for(let l of logs) html += `<tr><td>${new Date(l.time).toLocaleString()}</td><td>${l.user_id}</td><td>${l.action}</td><td>${l.details||''}</td></tr>`;
-        html += `</tbody></table></div></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
+
     async function renderDashboard(container) {
         let m = await api('/api/dashboard/metrics');
-        let statusLabels = Object.keys(m.status_counts);
-        let statusData = Object.values(m.status_counts);
-        let dailyLabels = m.daily_labels;
-        let dailyData = m.daily_data;
-        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Дашборд качества</h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div>
-            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div></div>
-            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div>
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div><canvas id="statusChart"></canvas></div><div><canvas id="trendChart"></canvas></div></div></div>`;
-        setTimeout(() => {
-            new Chart(document.getElementById('statusChart'), { type:'pie', data:{ labels:statusLabels, datasets:[{ data:statusData, backgroundColor:['#facc15','#3b82f6','#22c55e','#64748b'] }] } });
-            new Chart(document.getElementById('trendChart'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#15803d', fill:false }] } });
-        }, 100);
+        const statusLabels = Object.keys(m.status_counts);
+        const statusData = Object.values(m.status_counts);
+        const dailyLabels = m.daily_labels;
+        const dailyData = m.daily_data;
+        const slaCompliance = m.sla_compliance;
+        const avgResolution = m.avg_resolution_minutes;
+        container.innerHTML = `
+            <div class="card">
+                <h3 class="text-xl font-semibold mb-4 text-gray-800 dark:text-white">📊 Дашборд качества</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+                    <div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div>
+                    <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Решено / закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs mt-1">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div>
+                    <div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div>
+                    <div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Соблюдение SLA</div><div class="text-3xl font-bold">${slaCompliance}%</div></div>
+                    <div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Ср. время решения</div><div class="text-3xl font-bold">${avgResolution}<span class="text-lg"> мин</span></div></div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="statusChartDash" height="200"></canvas></div>
+                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="trendChartDash" height="200"></canvas></div>
+                </div>
+                <div class="text-xs text-gray-500 text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div>
+            </div>
+        `;
+        const statusColors = { 'new':'#facc15','in_progress':'#3b82f6','resolved':'#22c55e','closed':'#64748b'};
+        const backColors = statusLabels.map(s=>statusColors[s]||'#94a3b8');
+        new Chart(document.getElementById('statusChartDash'), { type:'pie', data:{ labels:statusLabels.map(s=>({new:'Новые',in_progress:'В работе',resolved:'Решённые',closed:'Закрытые'}[s]||s)), datasets:[{ data:statusData, backgroundColor:backColors }] }, options:{ responsive:true, maintainAspectRatio:true } });
+        new Chart(document.getElementById('trendChartDash'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#3b82f6', fill:true, tension:0.3 }] }, options:{ responsive:true } });
     }
+
     async function renderAdvancedDashboard(container) {
         container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3>
         <div class="flex flex-wrap gap-4 mb-6">
-            <div><label class="block text-sm">Период</label><select id="periodFilter"><option value="week">Неделя</option><option value="month" selected>Месяц</option><option value="quarter">Квартал</option></select></div>
+            <div><label class="block text-sm">Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div>
             <div><label class="block text-sm">Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div>
             <div><label class="block text-sm">Категория</label><select id="categoryFilter"><option value="">Все</option></select></div>
             <button class="btn-primary" id="applyFilters">Применить</button>
@@ -759,7 +829,8 @@ def index():
             <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div>
         </div>
         <div class="mb-6"><canvas id="operatorChart" height="300"></canvas></div>
-        <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div></div>`;
+        <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div>
+        </div>`;
         const usersRes = await fetch('/api/users');
         const users = await usersRes.json();
         const catRes = await fetch('/api/categories');
@@ -785,8 +856,8 @@ def index():
                 tableHtml += `<tr><td>${op.name}</td><td>${op.count}</td><td>${op.overall_avg}</td><td>${op.speed_avg}</td><td>${op.prof_avg}</td><td>${op.politeness_avg}</td></tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
+            const ctx = document.getElementById('operatorChart').getContext('2d');
             if(window.opChart) window.opChart.destroy();
-            let ctx = document.getElementById('operatorChart').getContext('2d');
             let labels = data.operator_stats.map(o=>o.name);
             let overalls = data.operator_stats.map(o=>o.overall_avg);
             window.opChart = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'Общая оценка', data:overalls, backgroundColor:'#15803d' }] } });
@@ -794,6 +865,7 @@ def index():
         document.getElementById('applyFilters').addEventListener('click', loadData);
         loadData();
     }
+
     loadUser();
 </script>
 </body>
