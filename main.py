@@ -6,6 +6,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from datetime import datetime, timedelta
 import sqlite3
 import secrets
+import csv
+import io
 
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -14,7 +16,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 def init_db():
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
-    # Таблица пользователей
+    # Таблицы
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE,
@@ -23,7 +25,6 @@ def init_db():
         role TEXT,
         created_at TEXT
     )''')
-    # Таблица заявок
     c.execute('''CREATE TABLE IF NOT EXISTS tickets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT,
@@ -40,7 +41,6 @@ def init_db():
         assigned_to_id INTEGER,
         created_by_id INTEGER
     )''')
-    # Таблица детальных оценок (новое)
     c.execute('''CREATE TABLE IF NOT EXISTS detailed_reviews (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ticket_id INTEGER,
@@ -52,7 +52,6 @@ def init_db():
         created_at TEXT
     )''')
     c.execute("CREATE INDEX IF NOT EXISTS idx_reviews_ticket ON detailed_reviews(ticket_id)")
-    # Комментарии
     c.execute('''CREATE TABLE IF NOT EXISTS comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ticket_id INTEGER,
@@ -60,7 +59,6 @@ def init_db():
         comment TEXT,
         created_at TEXT
     )''')
-    # Прикреплённые файлы
     c.execute('''CREATE TABLE IF NOT EXISTS attachments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ticket_id INTEGER,
@@ -68,7 +66,6 @@ def init_db():
         filepath TEXT,
         uploaded_at TEXT
     )''')
-    # Логи системы
     c.execute('''CREATE TABLE IF NOT EXISTS system_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_time TEXT,
@@ -76,17 +73,14 @@ def init_db():
         action TEXT,
         details TEXT
     )''')
-    # Настройки SLA
     c.execute('''CREATE TABLE IF NOT EXISTS sla_settings (
         param_key TEXT PRIMARY KEY,
         param_value INTEGER
     )''')
-    # Категории заявок и статей
     c.execute('''CREATE TABLE IF NOT EXISTS categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE
     )''')
-    # База знаний
     c.execute('''CREATE TABLE IF NOT EXISTS knowledge_articles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT,
@@ -102,19 +96,17 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
-
-    # Предустановленные пользователи (пароли совпадают с логином до @)
+    # Предустановленные пользователи
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
-
     conn.commit()
     conn.close()
 
 init_db()
 sessions = {}
 
-# ---------------------------------------- API ----------------------------------------
+# ---------------------------- API ----------------------------
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...)):
     if email == "admin@mail.ru":
@@ -254,7 +246,6 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
     conn.close()
     return {"message": "OK"}
 
-# ----- Детальная оценка (новое) -----
 @app.post("/api/tickets/{ticket_id}/detailed_review")
 def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = Form(...),
                         professionalism: int = Form(...), politeness: int = Form(...),
@@ -270,25 +261,12 @@ def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = F
     conn.close()
     return {"message": "OK"}
 
-@app.get("/api/tickets/{ticket_id}/detailed_review")
-def get_detailed_review(ticket_id: int):
-    conn = sqlite3.connect("monitoring.db")
-    c = conn.cursor()
-    c.execute("SELECT overall_rating, speed_rating, professionalism_rating, politeness_rating, comment FROM detailed_reviews WHERE ticket_id=? ORDER BY id DESC LIMIT 1", (ticket_id,))
-    row = c.fetchone()
-    conn.close()
-    if row:
-        return {"overall": row[0], "speed": row[1], "professionalism": row[2], "politeness": row[3], "comment": row[4]}
-    return None
-
-# ----- Дашборд расширенной аналитики -----
 @app.get("/api/dashboard/advanced_metrics")
 def advanced_metrics(period: str = "month", operator_id: int = None, category: str = None, session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
         raise HTTPException(403)
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
-    # Определяем интервал
     now = datetime.now()
     if period == "week":
         start_date = (now - timedelta(days=7)).isoformat()
@@ -315,12 +293,11 @@ def advanced_metrics(period: str = "month", operator_id: int = None, category: s
     rows = c.fetchall()
     total = len(rows)
     if total == 0:
-        return {"overall_avg": 0, "speed_avg": 0, "prof_avg": 0, "politeness_avg": 0, "operator_stats": [], "category_stats": {}}
+        return {"overall_avg": 0, "speed_avg": 0, "prof_avg": 0, "politeness_avg": 0, "operator_stats": []}
     overall_avg = sum(r[0] for r in rows) / total
     speed_avg = sum(r[1] for r in rows) / total
     prof_avg = sum(r[2] for r in rows) / total
     politeness_avg = sum(r[3] for r in rows) / total
-    # Статистика по операторам
     op_stats = {}
     for r in rows:
         op_id = r[4]
@@ -332,25 +309,11 @@ def advanced_metrics(period: str = "month", operator_id: int = None, category: s
         op_stats[op_id]["speed_sum"] += r[1]
         op_stats[op_id]["prof_sum"] += r[2]
         op_stats[op_id]["politeness_sum"] += r[3]
-    operator_stats = []
-    for op in op_stats.values():
-        operator_stats.append({
-            "name": op["name"],
-            "count": op["count"],
-            "overall_avg": round(op["overall_sum"] / op["count"], 2),
-            "speed_avg": round(op["speed_sum"] / op["count"], 2),
-            "prof_avg": round(op["prof_sum"] / op["count"], 2),
-            "politeness_avg": round(op["politeness_sum"] / op["count"], 2)
-        })
-    # Статистика по категориям
-    cat_stats = {}
-    for r in rows:
-        cat = r[6] or "Без категории"
-        if cat not in cat_stats:
-            cat_stats[cat] = {"count": 0, "overall_sum": 0}
-        cat_stats[cat]["count"] += 1
-        cat_stats[cat]["overall_sum"] += r[0]
-    category_stats = {cat: round(data["overall_sum"] / data["count"], 2) for cat, data in cat_stats.items()}
+    operator_stats = [{"name": d["name"], "count": d["count"],
+                      "overall_avg": round(d["overall_sum"]/d["count"], 2),
+                      "speed_avg": round(d["speed_sum"]/d["count"], 2),
+                      "prof_avg": round(d["prof_sum"]/d["count"], 2),
+                      "politeness_avg": round(d["politeness_sum"]/d["count"], 2)} for d in op_stats.values()]
     conn.close()
     return {
         "overall_avg": round(overall_avg, 2),
@@ -358,11 +321,9 @@ def advanced_metrics(period: str = "month", operator_id: int = None, category: s
         "prof_avg": round(prof_avg, 2),
         "politeness_avg": round(politeness_avg, 2),
         "total_reviews": total,
-        "operator_stats": operator_stats,
-        "category_stats": category_stats
+        "operator_stats": operator_stats
     }
 
-# ----- Остальные API (пользователи, SLA, экспорт и т.д.) -----
 @app.get("/api/users")
 def get_users(session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
@@ -495,7 +456,6 @@ def export_tickets(session: str = Cookie(None)):
     c.execute("SELECT id, title, status, priority, created_at, satisfaction, review FROM tickets")
     rows = c.fetchall()
     conn.close()
-    import csv, io
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["ID", "Title", "Status", "Priority", "Created", "Satisfaction", "Review"])
@@ -563,7 +523,6 @@ def index():
     let currentUser = null;
     let theme = localStorage.getItem('theme') || 'light';
     const notyf = new Notyf({ duration:3000, position:{x:'right',y:'top'} });
-
     function applyTheme() {
         if(theme === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); document.getElementById('themeToggle').innerText = '☀️'; }
         else { document.body.classList.remove('dark'); document.body.classList.add('light'); document.getElementById('themeToggle').innerText = '🌙'; }
@@ -571,7 +530,6 @@ def index():
     }
     applyTheme();
     document.getElementById('themeToggle').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; applyTheme(); };
-
     async function api(url, method='GET', body=null) {
         let opts = { method };
         if(body) { opts.body = body; opts.headers = {'Content-Type':'application/x-www-form-urlencoded'}; }
@@ -579,13 +537,11 @@ def index():
         if(!res.ok) throw new Error(await res.text());
         return res.json();
     }
-
     async function login(email, password) {
         let form = new URLSearchParams({email,password});
         await api('/api/login','POST',form);
         await loadUser();
     }
-
     async function loadUser() {
         try {
             currentUser = await api('/api/me');
@@ -593,9 +549,7 @@ def index():
             renderUI();
         } catch(e) { currentUser = null; renderLogin(); }
     }
-
     async function logout() { await api('/api/logout','POST'); currentUser = null; renderLogin(); }
-
     function renderLogin() {
         document.getElementById('app').innerHTML = `
             <div class="max-w-md mx-auto card"><h2 class="text-2xl font-bold mb-4">Вход</h2>
@@ -610,7 +564,6 @@ def index():
         document.getElementById('loginForm').onsubmit = async (e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch(e) { notyf.error('Ошибка входа'); } };
         document.getElementById('registerForm').onsubmit = async (e) => { e.preventDefault(); let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value }); await fetch('/api/register', { method:'POST', body:form }); notyf.success('Регистрация успешна, теперь войдите'); };
     }
-
     async function renderUI() {
         if(!currentUser) return;
         let tabs = [];
@@ -648,8 +601,6 @@ def index():
         }
         document.querySelectorAll('.tab-btn').forEach((btn,idx)=>btn.onclick=()=>{ document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.add('hidden')); document.getElementById(`pane-${idx}`).classList.remove('hidden'); });
     }
-
-    // --- Клиентские функции ---
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
         let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>';
@@ -707,20 +658,96 @@ def index():
             renderUI();
         };
     }
-
-    function renderNewTicket(container) { /* ... (как ранее) ... */ }
-    async function renderKnowledge(container) { /* ... */ }
-    async function renderOperatorTickets(container) { /* ... */ }
+    function renderNewTicket(container) {
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3>
+        <form id="newForm" class="space-y-4">
+            <div><label class="block text-sm font-medium">Название</label><input id="title" required></div>
+            <div><label class="block text-sm font-medium">Описание</label><textarea id="desc" rows="3"></textarea></div>
+            <div><label class="block text-sm font-medium">Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
+            <div><label class="block text-sm font-medium">Категория</label><select id="category"></select></div>
+            <button type="submit" class="btn-primary">Создать</button>
+        </form></div>`;
+        fetch('/api/categories').then(r=>r.json()).then(cats=>{ let sel = document.getElementById('category'); cats.forEach(c=>{ let opt = document.createElement('option'); opt.value = c.name; opt.innerText = c.name; sel.appendChild(opt); }); });
+        document.getElementById('newForm').onsubmit = async (e) => {
+            e.preventDefault();
+            let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value, category:document.getElementById('category').value });
+            await api('/api/tickets','POST',body);
+            notyf.success('Заявка создана');
+            renderUI();
+        };
+    }
+    async function renderKnowledge(container) {
+        let arts = await api('/api/knowledge');
+        let html = `<div class="card"><h3 class="text-xl font-semibold mb-4">База знаний</h3><input type="text" id="kbSearch" placeholder="Поиск..." class="mb-4"><div id="kbList">${arts.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded mb-2"><b>${a.title}</b><br>${a.content}</div>`).join('')}</div></div>`;
+        container.innerHTML = html;
+        document.getElementById('kbSearch').addEventListener('input', async (e) => {
+            let res = await api(`/api/knowledge?search=${encodeURIComponent(e.target.value)}`);
+            document.getElementById('kbList').innerHTML = res.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded mb-2"><b>${a.title}</b><br>${a.content}</div>`).join('');
+        });
+    }
+    async function renderOperatorTickets(container) {
+        let data = await api('/api/tickets');
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер заявки</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
+        for(let t of data.tickets) {
+            let actions = '';
+            if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
+            if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
+            if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
+            html += `<tr><td data-label="Номер заявки">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия">${actions}</td></tr>`;
+        }
+        html += `</tbody></table></div>`;
+        container.innerHTML = html;
+        window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`, 'PUT'); renderUI(); };
+        window.resolve = async (id) => { await api(`/api/tickets/${id}?status=resolved`, 'PUT'); renderUI(); };
+        window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`, 'PUT'); renderUI(); };
+        window.respond = async (id) => { let msg = prompt("Введите ответ по заявке:"); if(msg) alert("Ответ отправлен (демо)"); };
+    }
     function renderExport(container) { container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать заявки CSV</button></a></div>`; }
-    async function renderAdminUsers(container) { /* ... как ранее */ }
-    async function renderAdminSLA(container) { /* ... */ }
-    async function renderAdminLogs(container) { /* ... */ }
-    async function renderDashboard(container) { /* ... как ранее, с графиками */ }
+    async function renderAdminUsers(container) {
+        let users = await api('/api/users');
+        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Пользователи</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
+        for(let u of users) {
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
+        }
+        html += `</tbody></table></div>`;
+        container.innerHTML = html;
+        window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`, 'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
+        window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await fetch(`/api/users/${id}`, { method:'DELETE' }); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
+    }
+    async function renderAdminSLA(container) {
+        let sla = await api('/api/admin/sla');
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Настройки SLA</h3><div class="space-y-4"><div><label class="block">Время ответа High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}" class="w-full border rounded p-2"></div><div><label class="block">Время ответа Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}" class="w-full border rounded p-2"></div><button class="btn-primary" id="saveSla">Сохранить</button></div></div>`;
+        document.getElementById('saveSla').onclick = async () => { await api(`/api/admin/sla?response_high_hours=${document.getElementById('high').value}&response_medium_hours=${document.getElementById('medium').value}`, 'PUT'); notyf.success('Настройки сохранены'); };
+    }
+    async function renderAdminLogs(container) {
+        let logs = await api('/api/admin/logs');
+        let html = `<div class="card"><h3 class="text-xl font-semibold mb-4">Логи системы</h3><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
+        for(let l of logs) html += `<tr><td>${new Date(l.time).toLocaleString()}</td><td>${l.user_id}</td><td>${l.action}</td><td>${l.details||''}</td></tr>`;
+        html += `</tbody></table></div></div>`;
+        container.innerHTML = html;
+    }
+    async function renderDashboard(container) {
+        let m = await api('/api/dashboard/metrics');
+        let statusLabels = Object.keys(m.status_counts);
+        let statusData = Object.values(m.status_counts);
+        let dailyLabels = m.daily_labels;
+        let dailyData = m.daily_data;
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Дашборд качества</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div>
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div></div>
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div><canvas id="statusChart"></canvas></div><div><canvas id="trendChart"></canvas></div></div></div>`;
+        setTimeout(() => {
+            new Chart(document.getElementById('statusChart'), { type:'pie', data:{ labels:statusLabels, datasets:[{ data:statusData, backgroundColor:['#facc15','#3b82f6','#22c55e','#64748b'] }] } });
+            new Chart(document.getElementById('trendChart'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#15803d', fill:false }] } });
+        }, 100);
+    }
     async function renderAdvancedDashboard(container) {
-        // Фильтры и вывод данных
         container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3>
         <div class="flex flex-wrap gap-4 mb-6">
-            <div><label class="block text-sm">Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div>
+            <div><label class="block text-sm">Период</label><select id="periodFilter"><option value="week">Неделя</option><option value="month" selected>Месяц</option><option value="quarter">Квартал</option></select></div>
             <div><label class="block text-sm">Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div>
             <div><label class="block text-sm">Категория</label><select id="categoryFilter"><option value="">Все</option></select></div>
             <button class="btn-primary" id="applyFilters">Применить</button>
@@ -732,9 +759,7 @@ def index():
             <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div>
         </div>
         <div class="mb-6"><canvas id="operatorChart" height="300"></canvas></div>
-        <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div>
-        </div>`;
-        // Загружаем список операторов и категорий для фильтров
+        <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div></div>`;
         const usersRes = await fetch('/api/users');
         const users = await usersRes.json();
         const catRes = await fetch('/api/categories');
@@ -760,9 +785,8 @@ def index():
                 tableHtml += `<tr><td>${op.name}</td><td>${op.count}</td><td>${op.overall_avg}</td><td>${op.speed_avg}</td><td>${op.prof_avg}</td><td>${op.politeness_avg}</td></tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
-            // График
-            const ctx = document.getElementById('operatorChart').getContext('2d');
             if(window.opChart) window.opChart.destroy();
+            let ctx = document.getElementById('operatorChart').getContext('2d');
             let labels = data.operator_stats.map(o=>o.name);
             let overalls = data.operator_stats.map(o=>o.overall_avg);
             window.opChart = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'Общая оценка', data:overalls, backgroundColor:'#15803d' }] } });
@@ -770,17 +794,6 @@ def index():
         document.getElementById('applyFilters').addEventListener('click', loadData);
         loadData();
     }
-    // Вспомогательные функции (renderNewTicket, renderKnowledge, renderOperatorTickets, renderAdminUsers, renderAdminSLA, renderAdminLogs, renderDashboard) – они аналогичны предыдущим.
-    // Для краткости они не дублируются, но в полном файле они должны присутствовать.
-    // Ниже приведены заглушки – в реальном коде они есть.
-    async function renderNewTicket(container) { container.innerHTML = `<div class="card"><h3>Новая заявка</h3><form id="newForm">...</form></div>`; }
-    async function renderKnowledge(container) { container.innerHTML = `<div class="card"><h3>База знаний</h3>...</div>`; }
-    async function renderOperatorTickets(container) { container.innerHTML = `<div class="card"><h3>Все заявки</h3>...</div>`; }
-    async function renderAdminUsers(container) { container.innerHTML = `<div class="card"><h3>Пользователи</h3>...</div>`; }
-    async function renderAdminSLA(container) { container.innerHTML = `<div class="card"><h3>Настройки SLA</h3>...</div>`; }
-    async function renderAdminLogs(container) { container.innerHTML = `<div class="card"><h3>Логи</h3>...</div>`; }
-    async function renderDashboard(container) { container.innerHTML = `<div class="card"><h3>Дашборд</h3>...</div>`; }
-
     loadUser();
 </script>
 </body>
