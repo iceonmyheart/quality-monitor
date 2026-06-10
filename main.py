@@ -40,7 +40,6 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_created_by ON tickets(created_by_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_assigned_to ON tickets(assigned_to_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at)")
-    # Предустановленные пользователи удалены – регистрируйтесь сами
     conn.commit()
     conn.close()
 
@@ -420,7 +419,6 @@ def index():
         });
     }
 
-    // Клиентские функции
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
         let html = `<div class="card overflow-hidden"><table class="w-full table-optim"><thead><tr><th class="p-3 text-left">ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th>Действие</th></tr></thead><tbody>`;
@@ -432,7 +430,7 @@ def index():
             }
             html += `<tr class="border-b"><td class="p-3">${t.id}${t.review?.'<\/td>'...
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></td></div>`;
         container.innerHTML = html;
 
         window.openReviewModal = (id) => {
@@ -507,7 +505,7 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card overflow-hidden"><table class="w-full table-optim"><thead><td><th class="p-3">ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
+        let html = `<div class="card overflow-hidden"><table class="w-full table-optim"><thead><tr><th class="p-3">ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
         for (let t of data.tickets) {
             html += `<tr class="border-b"><td class="p-3">${t.id}${t.review?.'<\/td>'...
         }
@@ -547,7 +545,7 @@ def index():
 
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = `<div class="card overflow-hidden"><h3 class="text-xl font-semibold p-4 text-gray-800">👥 Управление пользователями</h3><table class="w-full table-optim"><thead><tr><th class="p-3">ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th>Действия</th></tr></thead><tbody>`;
+        let html = `<div class="card overflow-hidden"><h3 class="text-xl font-semibold p-4 text-gray-800">👥 Управление пользователями</h3><table class="w-full table-optim"><thead><tr><th class="p-3">ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th>Действия</th></td></thead><tbody>`;
         for (let u of users) {
             html += `<tr class="border-b"><td class="p-3">${u.id}${u.review?.'<\/td>'...
         }
