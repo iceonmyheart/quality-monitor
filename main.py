@@ -242,7 +242,6 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
-# ================= HTML с адаптивным дизайном =================
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -250,7 +249,7 @@ def index():
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Оптимасеть | Мониторинг качества</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -278,7 +277,6 @@ def index():
             border-radius: 0.5rem;
             cursor: pointer;
             border: none;
-            transition: background 0.2s;
         }
         .btn-primary:hover { background: #166534; }
         
@@ -305,7 +303,7 @@ def index():
             color: white;
         }
         
-        /* Адаптивные поля ввода */
+        /* Поля ввода: светлые в светлой теме, тёмные в тёмной */
         body.light input, body.light select, body.light textarea {
             background: #f8fafc;
             border: 1px solid #cbd5e1;
@@ -327,32 +325,21 @@ def index():
             ring: 2px solid #15803d;
         }
         
-        /* Адаптивность для мобильных устройств */
+        /* Мобильная адаптация */
         @media (max-width: 768px) {
-            body { padding: 0; }
-            .container { padding-left: 0.75rem; padding-right: 0.75rem; }
-            .card { padding: 1rem; }
-            .tab-btn { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
-            .btn-primary { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
-            h1 { font-size: 1.3rem; }
-            h2 { font-size: 1.2rem; }
-            th, td { font-size: 0.75rem; padding: 0.4rem; }
-            .table-wrapper { overflow-x: auto; }
-            .metrics-grid { grid-template-columns: 1fr !important; gap: 0.75rem; }
-            .flex.gap-4 { gap: 0.5rem; flex-wrap: wrap; }
-        }
-        
-        /* Для очень маленьких экранов */
-        @media (max-width: 480px) {
-            .tab-btn { font-size: 0.7rem; padding: 0.2rem 0.5rem; }
-            .btn-primary { font-size: 0.7rem; }
-            th, td { font-size: 0.65rem; }
-        }
-        
-        /* Обертка для таблиц с горизонтальной прокруткой */
-        .table-wrapper {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
+            body { padding: 0.5rem; }
+            .container { padding: 0.5rem; }
+            .card { padding: 1rem; margin-bottom: 1rem; }
+            .tab-btn { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+            .btn-primary { padding: 0.6rem 1rem; font-size: 1rem; }
+            /* Таблицы преобразуем в карточки */
+            table, thead, tbody, th, td, tr { display: block; }
+            thead { display: none; }
+            tr { margin-bottom: 1rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.5rem; background: inherit; }
+            td { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem; border-bottom: none; }
+            td:before { content: attr(data-label); font-weight: bold; width: 40%; color: #15803d; }
+            .grid { grid-template-columns: 1fr !important; }
+            .space-y-4 > * + * { margin-top: 0.75rem; }
         }
     </style>
 </head>
@@ -439,40 +426,17 @@ def index():
             <div class="max-w-md mx-auto card">
                 <h2 class="text-2xl font-bold mb-4">Вход</h2>
                 <form id="loginForm" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium">Email</label>
-                        <input id="email" type="email" class="w-full">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium">Пароль</label>
-                        <input id="password" type="password" class="w-full">
-                    </div>
+                    <div><label class="block text-sm font-medium">Email</label><input id="email" type="email" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Пароль</label><input id="password" type="password" class="w-full"></div>
                     <button type="submit" class="btn-primary w-full">Войти</button>
                 </form>
                 <hr class="my-6 border-gray-200">
                 <h3 class="text-xl font-semibold mb-4">Регистрация</h3>
                 <form id="registerForm" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium">Email</label>
-                        <input id="regEmail" type="email" class="w-full">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium">ФИО</label>
-                        <input id="regName" class="w-full">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium">Пароль</label>
-                        <input id="regPassword" type="password" class="w-full">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium">Роль</label>
-                        <select id="regRole" class="w-full">
-                            <option value="client">Клиент</option>
-                            <option value="operator">Оператор</option>
-                            <option value="admin">Администратор</option>
-                            <option value="quality">Менеджер качества</option>
-                        </select>
-                    </div>
+                    <div><label class="block text-sm font-medium">Email</label><input id="regEmail" type="email" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">ФИО</label><input id="regName" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Пароль</label><input id="regPassword" type="password" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Роль</label><select id="regRole" class="w-full"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></div>
                     <button type="submit" class="btn-primary w-full">Зарегистрироваться</button>
                 </form>
             </div>
@@ -482,9 +446,7 @@ def index():
             try {
                 await login(e.target.email.value, e.target.password.value);
                 notyf.success('Вход выполнен');
-            } catch(e) {
-                notyf.error('Ошибка входа');
-            }
+            } catch(e) { notyf.error('Ошибка входа'); }
         };
         document.getElementById('registerForm').onsubmit = async (e) => {
             e.preventDefault();
@@ -506,7 +468,6 @@ def index():
         else if(currentUser.role === 'operator') tabs = ['Все заявки', 'Экспорт'];
         else if(currentUser.role === 'admin') tabs = ['Пользователи', 'Дашборд', 'Экспорт'];
         else if(currentUser.role === 'quality') tabs = ['Дашборд', 'Экспорт'];
-        
         let html = `<div class="flex gap-2 mb-4 border-b pb-2 flex-wrap">${tabs.map((t,i)=>`<button class="tab-btn ${i===0?'active':''}" data-tab="${i}">${t}</button>`).join('')}</div><div id="panes"></div>`;
         document.getElementById('app').innerHTML = html;
         let panesDiv = document.getElementById('panes');
@@ -538,10 +499,9 @@ def index():
         });
     }
 
-    // Клиентские функции
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card"><div class="table-wrapper"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>`;
+        let html = `<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>`;
         for(let t of data.tickets) {
             let reviewShort = t.review ? t.review.substring(0,50) + (t.review.length>50?'…':'') : '—';
             let actionBtn = '';
@@ -549,9 +509,17 @@ def index():
                 actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openReview(${t.id})">Оценить</button>`;
             }
             html += `<tr>
-                <td class="p-2">${t.id}${t.review?.'<\/td>'...
+                <td data-label="ID">${t.id}</td>
+                <td data-label="Название">${t.title}</td>
+                <td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td>
+                <td data-label="Приоритет">${t.priority}</td>
+                <td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td>
+                <td data-label="Оценка">${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td>
+                <td data-label="Отзыв">${reviewShort}</td>
+                <td data-label="Действие">${actionBtn}</td>
+            </tr>`;
         }
-        html += `</tbody></table></div></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.openReview = async (id) => {
             let val = prompt("Оцените качество (1-5):", "5");
@@ -587,16 +555,21 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card"><div class="table-wrapper"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
+        let html = `<div class="card overflow-x-auto"><table class="w-full"><thead></tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
             if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
             html += `<tr>
-                <td class="p-2">${t.id}${t.review?.'<\/td>'...
+                <td data-label="ID">${t.id}</td>
+                <td data-label="Название">${t.title}</td>
+                <td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td>
+                <td data-label="Приоритет">${t.priority}</td>
+                <td data-label="Действия">${actions}</td>
+            </tr>`;
         }
-        html += `</tbody></table></div></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`, 'PUT'); renderUI(); };
         window.resolve = async (id) => { await api(`/api/tickets/${id}?status=resolved`, 'PUT'); renderUI(); };
@@ -613,12 +586,18 @@ def index():
 
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = `<div class="card"><div class="table-wrapper"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>`;
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>`;
         for(let u of users) {
             html += `<tr>
-                <td class="p-2">${u.id}${u.review?.'<\/td>'...
+                <td data-label="ID">${u.id}</td>
+                <td data-label="Email">${u.email}</td>
+                <td data-label="ФИО">${u.full_name}</td>
+                <td data-label="Роль">${u.role}</td>
+                <td data-label="Новая роль"><select id="role-${u.id}" class="border rounded p-1"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td>
+                <td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td>
+            </tr>`;
         }
-        html += `</tbody></table></div></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.changeRole = async (id) => {
             let newRole = document.getElementById(`role-${id}`).value;
@@ -642,7 +621,7 @@ def index():
         let dailyLabels = m.daily_labels;
         let dailyData = m.daily_data;
         container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Дашборд качества</h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 metrics-grid">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm text-gray-500">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div>
             <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm text-gray-500">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div></div>
             <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm text-gray-500">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div>
