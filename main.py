@@ -46,6 +46,7 @@ def init_db():
 init_db()
 sessions = {}
 
+# ---------------------------------------- API (без изменений) ----------------------------------------
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...), role: str = Form(...)):
     conn = sqlite3.connect("monitoring.db")
@@ -242,6 +243,7 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
+# ---------------------------------------- HTML (исправленный) ----------------------------------------
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -256,10 +258,12 @@ def index():
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
     <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
     <style>
-        /* Базовые переменные тем */
+        /* Подавление предупреждения Tailwind */
+        const originalWarn = console.warn;
+        console.warn = function(msg) { if (msg.includes('cdn.tailwindcss.com')) return; originalWarn(msg); };
+        
         body.light { background: #ffffff; color: #1e293b; }
         body.dark { background: #0a192f; color: #e6f1ff; }
-        
         .card {
             background: var(--bg);
             border: 1px solid #e2e8f0;
@@ -269,77 +273,31 @@ def index():
         }
         body.light .card { background: #ffffff; border-color: #e2e8f0; }
         body.dark .card { background: #1e293b; border-color: #334155; }
-        
-        .btn-primary {
-            background: #15803d;
-            color: white;
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            cursor: pointer;
-            border: none;
-        }
+        .btn-primary { background: #15803d; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; border: none; }
         .btn-primary:hover { background: #166534; }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 0.2rem 0.7rem;
-            border-radius: 2rem;
-            font-size: 0.7rem;
-            font-weight: 600;
-        }
+        .status-badge { display: inline-block; padding: 0.2rem 0.7rem; border-radius: 2rem; font-size: 0.7rem; font-weight: 600; }
         .status-new { background: #facc1520; color: #facc15; }
         .status-in_progress { background: #3b82f620; color: #3b82f6; }
         .status-resolved { background: #22c55e20; color: #22c55e; }
         .status-closed { background: #64748b20; color: #94a3b8; }
-        
-        .tab-btn {
-            padding: 0.5rem 1rem;
-            border-radius: 2rem;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        .tab-btn.active {
-            background: #15803d;
-            color: white;
-        }
-        
-        /* Поля ввода: светлые в светлой теме, тёмные в тёмной */
-        body.light input, body.light select, body.light textarea {
-            background: #f8fafc;
-            border: 1px solid #cbd5e1;
-            color: #1e293b;
-        }
-        body.dark input, body.dark select, body.dark textarea {
-            background: #0f172a;
-            border: 1px solid #334155;
-            color: #e2e8f0;
-        }
-        input, select, textarea {
-            border-radius: 0.5rem;
-            padding: 0.5rem;
-            width: 100%;
-            outline: none;
-        }
-        input:focus, select:focus, textarea:focus {
-            border-color: #15803d;
-            ring: 2px solid #15803d;
-        }
-        
-        /* Мобильная адаптация */
+        .tab-btn { padding: 0.5rem 1rem; border-radius: 2rem; cursor: pointer; transition: 0.2s; }
+        .tab-btn.active { background: #15803d; color: white; }
+        body.light input, body.light select, body.light textarea { background: #f8fafc; border: 1px solid #cbd5e1; color: #1e293b; }
+        body.dark input, body.dark select, body.dark textarea { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; }
+        input, select, textarea { border-radius: 0.5rem; padding: 0.5rem; width: 100%; outline: none; }
+        input:focus, select:focus, textarea:focus { border-color: #15803d; ring: 2px solid #15803d; }
         @media (max-width: 768px) {
             body { padding: 0.5rem; }
             .container { padding: 0.5rem; }
             .card { padding: 1rem; margin-bottom: 1rem; }
             .tab-btn { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
             .btn-primary { padding: 0.6rem 1rem; font-size: 1rem; }
-            /* Таблицы преобразуем в карточки */
             table, thead, tbody, th, td, tr { display: block; }
             thead { display: none; }
             tr { margin-bottom: 1rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.5rem; background: inherit; }
             td { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem; border-bottom: none; }
             td:before { content: attr(data-label); font-weight: bold; width: 40%; color: #15803d; }
             .grid { grid-template-columns: 1fr !important; }
-            .space-y-4 > * + * { margin-top: 0.75rem; }
         }
     </style>
 </head>
@@ -501,7 +459,7 @@ def index():
 
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>`;
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let reviewShort = t.review ? t.review.substring(0,50) + (t.review.length>50?'…':'') : '—';
             let actionBtn = '';
@@ -555,7 +513,7 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card overflow-x-auto"><table class="w-full"><thead></tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
@@ -586,7 +544,7 @@ def index():
 
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>`;
+        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
             html += `<tr>
                 <td data-label="ID">${u.id}</td>
