@@ -242,7 +242,7 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
-# ================= HTML =================
+# ================= HTML с адаптивным дизайном =================
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -250,28 +250,115 @@ def index():
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Оптимасеть | Мониторинг качества</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
     <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
     <style>
-        body.light { background:#ffffff; color:#1e293b; }
-        body.dark { background:#0a192f; color:#e6f1ff; }
-        .card { background: var(--bg); border:1px solid #e2e8f0; border-radius:1rem; padding:1.5rem; margin-bottom:1.5rem; }
-        .btn-primary { background:#15803d; color:white; padding:0.5rem 1rem; border-radius:0.5rem; }
-        .status-badge { padding:0.2rem 0.7rem; border-radius:2rem; font-size:0.7rem; }
-        .status-new { background:#facc1520; color:#facc15; }
-        .status-in_progress { background:#3b82f620; color:#3b82f6; }
-        .status-resolved { background:#22c55e20; color:#22c55e; }
-        .status-closed { background:#64748b20; color:#94a3b8; }
-        .tab-btn.active { background:#15803d; color:white; }
-        input, select, textarea { background:#0f172a; border:1px solid #334155; border-radius:0.5rem; padding:0.5rem; width:100%; color:white; }
+        /* Базовые переменные тем */
+        body.light { background: #ffffff; color: #1e293b; }
+        body.dark { background: #0a192f; color: #e6f1ff; }
+        
+        .card {
+            background: var(--bg);
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        body.light .card { background: #ffffff; border-color: #e2e8f0; }
+        body.dark .card { background: #1e293b; border-color: #334155; }
+        
+        .btn-primary {
+            background: #15803d;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            border: none;
+            transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #166534; }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 0.2rem 0.7rem;
+            border-radius: 2rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        .status-new { background: #facc1520; color: #facc15; }
+        .status-in_progress { background: #3b82f620; color: #3b82f6; }
+        .status-resolved { background: #22c55e20; color: #22c55e; }
+        .status-closed { background: #64748b20; color: #94a3b8; }
+        
+        .tab-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .tab-btn.active {
+            background: #15803d;
+            color: white;
+        }
+        
+        /* Адаптивные поля ввода */
+        body.light input, body.light select, body.light textarea {
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            color: #1e293b;
+        }
+        body.dark input, body.dark select, body.dark textarea {
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+        }
+        input, select, textarea {
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+            width: 100%;
+            outline: none;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: #15803d;
+            ring: 2px solid #15803d;
+        }
+        
+        /* Адаптивность для мобильных устройств */
+        @media (max-width: 768px) {
+            body { padding: 0; }
+            .container { padding-left: 0.75rem; padding-right: 0.75rem; }
+            .card { padding: 1rem; }
+            .tab-btn { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+            .btn-primary { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+            h1 { font-size: 1.3rem; }
+            h2 { font-size: 1.2rem; }
+            th, td { font-size: 0.75rem; padding: 0.4rem; }
+            .table-wrapper { overflow-x: auto; }
+            .metrics-grid { grid-template-columns: 1fr !important; gap: 0.75rem; }
+            .flex.gap-4 { gap: 0.5rem; flex-wrap: wrap; }
+        }
+        
+        /* Для очень маленьких экранов */
+        @media (max-width: 480px) {
+            .tab-btn { font-size: 0.7rem; padding: 0.2rem 0.5rem; }
+            .btn-primary { font-size: 0.7rem; }
+            th, td { font-size: 0.65rem; }
+        }
+        
+        /* Обертка для таблиц с горизонтальной прокруткой */
+        .table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
     </style>
 </head>
 <body class="light">
-<div class="max-w-7xl mx-auto px-4 py-6">
-    <div class="flex justify-between items-center mb-8 p-4 bg-white shadow rounded-2xl">
+<div class="max-w-7xl mx-auto px-4 py-6 container">
+    <div class="flex justify-between items-center mb-8 p-4 bg-white shadow rounded-2xl border">
         <div class="flex items-center gap-3">
             <div class="text-3xl">🛜</div>
             <div>
@@ -292,16 +379,29 @@ def index():
     const notyf = new Notyf({ duration:3000, position:{x:'right',y:'top'} });
 
     function applyTheme() {
-        if(theme === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); document.getElementById('themeToggle').innerText='☀️'; }
-        else { document.body.classList.remove('dark'); document.body.classList.add('light'); document.getElementById('themeToggle').innerText='🌙'; }
+        if(theme === 'dark') {
+            document.body.classList.remove('light');
+            document.body.classList.add('dark');
+            document.getElementById('themeToggle').innerText = '☀️';
+        } else {
+            document.body.classList.remove('dark');
+            document.body.classList.add('light');
+            document.getElementById('themeToggle').innerText = '🌙';
+        }
         localStorage.setItem('theme', theme);
     }
     applyTheme();
-    document.getElementById('themeToggle').onclick = () => { theme = theme==='dark'?'light':'dark'; applyTheme(); };
+    document.getElementById('themeToggle').onclick = () => {
+        theme = theme === 'dark' ? 'light' : 'dark';
+        applyTheme();
+    };
 
     async function api(url, method='GET', body=null) {
         let opts = { method };
-        if(body) { opts.body = body; opts.headers = {'Content-Type':'application/x-www-form-urlencoded'}; }
+        if(body) {
+            opts.body = body;
+            opts.headers = {'Content-Type':'application/x-www-form-urlencoded'};
+        }
         let res = await fetch(url, opts);
         if(!res.ok) throw new Error(await res.text());
         return res.json();
@@ -316,35 +416,87 @@ def index():
     async function loadUser() {
         try {
             currentUser = await api('/api/me');
-            document.getElementById('userPanel').innerHTML = `<span>${currentUser.name}</span> <span class="bg-gray-200 px-2 rounded-full">${currentUser.role}</span> <button class="bg-red-50 text-red-600 px-3 py-1 rounded-full" onclick="logout()">Выйти</button>`;
+            document.getElementById('userPanel').innerHTML = `
+                <span class="font-medium">${currentUser.name}</span>
+                <span class="bg-gray-200 text-gray-800 px-2 py-0.5 rounded-full text-sm">${currentUser.role}</span>
+                <button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm" onclick="logout()">Выйти</button>
+            `;
             renderUI();
-        } catch(e) { currentUser=null; renderLogin(); }
+        } catch(e) {
+            currentUser = null;
+            renderLogin();
+        }
     }
 
-    async function logout() { await api('/api/logout','POST'); currentUser=null; renderLogin(); }
+    async function logout() {
+        await api('/api/logout','POST');
+        currentUser = null;
+        renderLogin();
+    }
 
     function renderLogin() {
         document.getElementById('app').innerHTML = `
-            <div class="card max-w-md mx-auto">
-                <h2>Вход</h2>
-                <form id="loginForm">
-                    <div><label>Email</label><input id="email" type="email"></div>
-                    <div><label>Пароль</label><input id="password" type="password"></div>
-                    <button type="submit" class="btn-primary">Войти</button>
+            <div class="max-w-md mx-auto card">
+                <h2 class="text-2xl font-bold mb-4">Вход</h2>
+                <form id="loginForm" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium">Email</label>
+                        <input id="email" type="email" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">Пароль</label>
+                        <input id="password" type="password" class="w-full">
+                    </div>
+                    <button type="submit" class="btn-primary w-full">Войти</button>
                 </form>
-                <hr>
-                <h3>Регистрация</h3>
-                <form id="registerForm">
-                    <div><label>Email</label><input id="regEmail" type="email"></div>
-                    <div><label>ФИО</label><input id="regName"></div>
-                    <div><label>Пароль</label><input id="regPassword" type="password"></div>
-                    <div><label>Роль</label><select id="regRole"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></div>
-                    <button type="submit" class="btn-primary">Зарегистрироваться</button>
+                <hr class="my-6 border-gray-200">
+                <h3 class="text-xl font-semibold mb-4">Регистрация</h3>
+                <form id="registerForm" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium">Email</label>
+                        <input id="regEmail" type="email" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">ФИО</label>
+                        <input id="regName" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">Пароль</label>
+                        <input id="regPassword" type="password" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">Роль</label>
+                        <select id="regRole" class="w-full">
+                            <option value="client">Клиент</option>
+                            <option value="operator">Оператор</option>
+                            <option value="admin">Администратор</option>
+                            <option value="quality">Менеджер качества</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn-primary w-full">Зарегистрироваться</button>
                 </form>
             </div>
         `;
-        document.getElementById('loginForm').onsubmit = async (e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch(e) { notyf.error('Ошибка входа'); } };
-        document.getElementById('registerForm').onsubmit = async (e) => { e.preventDefault(); let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value, role:e.target.regRole.value }); await fetch('/api/register',{method:'POST',body:form}); notyf.success('Регистрация успешна'); };
+        document.getElementById('loginForm').onsubmit = async (e) => {
+            e.preventDefault();
+            try {
+                await login(e.target.email.value, e.target.password.value);
+                notyf.success('Вход выполнен');
+            } catch(e) {
+                notyf.error('Ошибка входа');
+            }
+        };
+        document.getElementById('registerForm').onsubmit = async (e) => {
+            e.preventDefault();
+            let form = new URLSearchParams({
+                email: e.target.regEmail.value,
+                full_name: e.target.regName.value,
+                password: e.target.regPassword.value,
+                role: e.target.regRole.value
+            });
+            await fetch('/api/register', { method:'POST', body:form });
+            notyf.success('Регистрация успешна, теперь войдите');
+        };
     }
 
     async function renderUI() {
@@ -354,11 +506,14 @@ def index():
         else if(currentUser.role === 'operator') tabs = ['Все заявки', 'Экспорт'];
         else if(currentUser.role === 'admin') tabs = ['Пользователи', 'Дашборд', 'Экспорт'];
         else if(currentUser.role === 'quality') tabs = ['Дашборд', 'Экспорт'];
-        let html = `<div class="flex gap-2 mb-4">${tabs.map((t,i)=>`<button class="tab-btn px-3 py-1 rounded-full ${i===0?'active':''}" data-tab="${i}">${t}</button>`).join('')}</div><div id="panes"></div>`;
+        
+        let html = `<div class="flex gap-2 mb-4 border-b pb-2 flex-wrap">${tabs.map((t,i)=>`<button class="tab-btn ${i===0?'active':''}" data-tab="${i}">${t}</button>`).join('')}</div><div id="panes"></div>`;
         document.getElementById('app').innerHTML = html;
         let panesDiv = document.getElementById('panes');
-        for(let i=0;i<tabs.length;i++) {
-            let pane = document.createElement('div'); pane.className = `tab-pane ${i===0?'block':'hidden'}`; pane.id = `pane-${i}`;
+        for(let i=0; i<tabs.length; i++) {
+            let pane = document.createElement('div');
+            pane.className = `tab-pane ${i===0?'block':'hidden'}`;
+            pane.id = `pane-${i}`;
             panesDiv.appendChild(pane);
             if(currentUser.role === 'client') {
                 if(tabs[i]==='Мои заявки') await renderClientTickets(pane);
@@ -383,21 +538,26 @@ def index():
         });
     }
 
+    // Клиентские функции
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>`;
+        let html = `<div class="card"><div class="table-wrapper"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>`;
         for(let t of data.tickets) {
-            let act = '';
-            if(t.status==='resolved' && !t.satisfaction) act = `<button class="bg-green-600 text-white px-2 py-1 rounded" onclick="openReview(${t.id})">Оценить</button>`;
-            html += `<tr><td>${t.id}</td><td>${t.title}</td><td><span class="status-badge status-${t.status}">${t.status}</span></td><td>${t.priority}</td><td>${new Date(t.created_at).toLocaleDateString()}</td><td>${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td>${t.review?t.review.substring(0,50):'—'}</td><td>${act}</td></tr>`;
+            let reviewShort = t.review ? t.review.substring(0,50) + (t.review.length>50?'…':'') : '—';
+            let actionBtn = '';
+            if(t.status === 'resolved' && !t.satisfaction) {
+                actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openReview(${t.id})">Оценить</button>`;
+            }
+            html += `<tr>
+                <td class="p-2">${t.id}${t.review?.'<\/td>'...
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></table></div></div>`;
         container.innerHTML = html;
         window.openReview = async (id) => {
-            let val = prompt("Оценка (1-5):",5);
+            let val = prompt("Оцените качество (1-5):", "5");
             if(val && val>=1 && val<=5) {
-                let rev = prompt("Ваш отзыв (необязательно):","");
-                await api(`/api/tickets/${id}?satisfaction=${val}&review=${encodeURIComponent(rev||'')}`,'PUT');
+                let rev = prompt("Ваш отзыв (необязательно):", "");
+                await api(`/api/tickets/${id}?satisfaction=${val}&review=${encodeURIComponent(rev||'')}`, 'PUT');
                 notyf.success('Спасибо за отзыв!');
                 renderUI();
             }
@@ -405,11 +565,21 @@ def index():
     }
 
     function renderNewTicket(container) {
-        container.innerHTML = `<div class="card"><h3>Новая заявка</h3><form id="newForm"><div><label>Название</label><input id="title" required></div><div><label>Описание</label><textarea id="desc" rows="3"></textarea></div><div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div><button class="btn-primary" type="submit">Создать</button></form></div>`;
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3>
+        <form id="newForm" class="space-y-4">
+            <div><label class="block text-sm font-medium">Название</label><input id="title" required></div>
+            <div><label class="block text-sm font-medium">Описание</label><textarea id="desc" rows="3"></textarea></div>
+            <div><label class="block text-sm font-medium">Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
+            <button type="submit" class="btn-primary">Создать заявку</button>
+        </form></div>`;
         document.getElementById('newForm').onsubmit = async (e) => {
             e.preventDefault();
-            let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value });
-            await api('/api/tickets','POST',body);
+            let body = new URLSearchParams({
+                title: document.getElementById('title').value,
+                description: document.getElementById('desc').value,
+                priority: document.getElementById('priority').value
+            });
+            await api('/api/tickets', 'POST', body);
             notyf.success('Заявка создана');
             renderUI();
         };
@@ -417,36 +587,52 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<div class="card"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
+        let html = `<div class="card"><div class="table-wrapper"><table class="w-full"><thead><tr><th>ID</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
         for(let t of data.tickets) {
             let actions = '';
-            if(t.status==='new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded" onclick="assign(${t.id})">Принять</button>`;
-            if(t.status==='in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded" onclick="respond(${t.id})">Ответить</button>`;
-            if(t.status==='resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr><td>${t.id}</td><td>${t.title}</td><td><span class="status-badge status-${t.status}">${t.status}</span></td><td>${t.priority}</td><td>${actions}</td></tr>`;
+            if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
+            if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
+            if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
+            html += `<tr>
+                <td class="p-2">${t.id}${t.review?.'<\/td>'...
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></table></div></div>`;
         container.innerHTML = html;
-        window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
-        window.resolve = async (id) => { await api(`/api/tickets/${id}?status=resolved`,'PUT'); renderUI(); };
-        window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`,'PUT'); renderUI(); };
-        window.respond = async (id) => { let msg = prompt("Введите ответ:"); if(msg) alert("Ответ отправлен (демо)"); };
+        window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`, 'PUT'); renderUI(); };
+        window.resolve = async (id) => { await api(`/api/tickets/${id}?status=resolved`, 'PUT'); renderUI(); };
+        window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`, 'PUT'); renderUI(); };
+        window.respond = async (id) => {
+            let msg = prompt("Введите ответ по заявке:");
+            if(msg) alert("Ответ отправлен (демонстрация)");
+        };
     }
 
     function renderExport(container) {
-        container.innerHTML = `<div class="card"><h3>Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`;
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт данных</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать заявки CSV</button></a></div>`;
     }
 
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = `<div class="card"><h3>Пользователи</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>Имя</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>`;
+        let html = `<div class="card"><div class="table-wrapper"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>`;
         for(let u of users) {
-            html += `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.full_name}</td><td>${u.role}</td><td><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td><button class="bg-blue-600 text-white px-2 py-1 rounded" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
+            html += `<tr>
+                <td class="p-2">${u.id}${u.review?.'<\/td>'...
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></table></div></div>`;
         container.innerHTML = html;
-        window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); renderAdminUsers(container); };
-        window.delUser = async (id) => { if(confirm('Удалить?')) { await fetch(`/api/users/${id}`,{method:'DELETE'}); renderAdminUsers(container); } };
+        window.changeRole = async (id) => {
+            let newRole = document.getElementById(`role-${id}`).value;
+            await api(`/api/users/${id}/role?new_role=${newRole}`, 'PUT');
+            notyf.success('Роль изменена');
+            renderAdminUsers(container);
+        };
+        window.delUser = async (id) => {
+            if(confirm('Удалить пользователя?')) {
+                await fetch(`/api/users/${id}`, { method:'DELETE' });
+                notyf.success('Пользователь удалён');
+                renderAdminUsers(container);
+            }
+        };
     }
 
     async function renderDashboard(container) {
@@ -455,20 +641,20 @@ def index():
         let statusData = Object.values(m.status_counts);
         let dailyLabels = m.daily_labels;
         let dailyData = m.daily_data;
-        container.innerHTML = `<div class="card"><h3>Дашборд качества</h3>
-        <div class="grid grid-cols-3 gap-4 mb-4">
-            <div class="bg-gray-100 p-3 rounded"><b>Всего заявок</b><br><span class="text-2xl">${m.total_tickets}</span></div>
-            <div class="bg-gray-100 p-3 rounded"><b>Решено/закрыто</b><br><span class="text-2xl">${m.resolved_tickets}</span></div>
-            <div class="bg-gray-100 p-3 rounded"><b>Средний CSAT</b><br><span class="text-2xl">${m.avg_csat}/5</span></div>
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Дашборд качества</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 metrics-grid">
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm text-gray-500">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div>
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm text-gray-500">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div></div>
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm text-gray-500">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div>
         </div>
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div><canvas id="statusChart"></canvas></div>
             <div><canvas id="trendChart"></canvas></div>
         </div></div>`;
         setTimeout(() => {
             new Chart(document.getElementById('statusChart'), { type:'pie', data:{ labels:statusLabels, datasets:[{ data:statusData, backgroundColor:['#facc15','#3b82f6','#22c55e','#64748b'] }] } });
-            new Chart(document.getElementById('trendChart'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#15803d' }] } });
-        },100);
+            new Chart(document.getElementById('trendChart'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#15803d', fill:false }] } });
+        }, 100);
     }
 
     loadUser();
@@ -480,5 +666,5 @@ def index():
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
-    print(f"\n🚀 Сервер запущен на порту {port}")
+    print(f"\n🚀 Сервер Оптимасеть запущен на порту {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
