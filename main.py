@@ -2,21 +2,19 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Form, Cookie, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from datetime import datetime, timedelta
 import sqlite3
 import secrets
-import random
 import csv
 import io
 
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-app.add_middleware(GZipMiddleware, minimum_size=500)
 
 def init_db():
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
+    # Таблицы
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE,
@@ -90,6 +88,7 @@ def init_db():
         category_id INTEGER,
         created_at TEXT
     )''')
+    # Начальные данные
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Технические проблемы')")
@@ -97,18 +96,16 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
-    # Предустановленные пользователи
+    # Пользователи
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
-
     # Получаем id оператора
     c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
     op_row = c.fetchone()
     operator_id = op_row[0] if op_row else 2
 
-    # Добавляем 15 тестовых заявок, если таблица пуста
+    # Тестовые заявки
     c.execute("SELECT COUNT(*) FROM tickets")
     if c.fetchone()[0] == 0:
         now = datetime.now()
@@ -131,26 +128,29 @@ def init_db():
         ]
         for t in test_tickets:
             c.execute("""INSERT INTO tickets 
-                (title, description, status, priority, category, created_at, assigned_to_id, review, satisfaction, resolved_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""", (t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[5]))
+                (title, description, status, priority, category, created_at, assigned_to_id, review, satisfaction)
+                VALUES (?,?,?,?,?,?,?,?,?)""", t)
             ticket_id = c.lastrowid
-            # Установим resolved_at примерно на 2 часа позже created_at для расчёта времени
-            created_dt = datetime.fromisoformat(t[5])
-            resolved_dt = created_dt + timedelta(hours=2, minutes=random.randint(10, 120))
-            c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_dt.isoformat(), int((resolved_dt - created_dt).total_seconds()/60), ticket_id))
-            if t[8]:
-                overall = t[8]
-                if overall == 5:
-                    speed = prof = politeness = 5
-                elif overall == 4:
-                    speed = prof = politeness = 4
-                else:
-                    speed = prof = politeness = 3
-                c.execute("""INSERT INTO detailed_reviews 
-                    (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at)
-                    VALUES (?,?,?,?,?,?,?)""",
-                    (ticket_id, overall, speed, prof, politeness, t[7], (now - timedelta(days=1)).isoformat()))
-        # Добавляем пару активных заявок
+            # Детальная оценка
+            overall = t[8]
+            if overall == 5:
+                speed = prof = politeness = 5
+            elif overall == 4:
+                speed = prof = politeness = 4
+            else:
+                speed = prof = politeness = 3
+            c.execute("""INSERT INTO detailed_reviews 
+                (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at)
+                VALUES (?,?,?,?,?,?,?)""",
+                (ticket_id, overall, speed, prof, politeness, t[7], (now - timedelta(days=1)).isoformat()))
+            # Установим resolved_at и resolution_time_minutes
+            resolved_at = (now - timedelta(days=1)).isoformat()
+            created_at = t[5]
+            created_dt = datetime.fromisoformat(created_at)
+            resolved_dt = datetime.fromisoformat(resolved_at)
+            resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
+            c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
+        # Две активные заявки
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
                     VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
@@ -213,41 +213,22 @@ def logout(response: Response, session: str = Cookie(None)):
     return {"message": "OK"}
 
 @app.get("/api/tickets")
-def get_tickets(session: str = Cookie(None), page: int = 1, limit: int = 10,
-                status: str = "", priority: str = "", search: str = ""):
+def get_tickets(session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
-    offset = (page - 1) * limit
-    query = "SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets WHERE 1=1"
-    params = []
     if user["role"] == "client":
-        query += " AND created_by_id = ?"
-        params.append(user["id"])
+        c.execute("SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets WHERE created_by_id=?", (user["id"],))
     elif user["role"] == "operator":
-        query += " AND (assigned_to_id = ? OR assigned_to_id IS NULL)"
-        params.append(user["id"])
-    if status:
-        query += " AND status = ?"
-        params.append(status)
-    if priority:
-        query += " AND priority = ?"
-        params.append(priority)
-    if search:
-        query += " AND (title LIKE ? OR description LIKE ?)"
-        params.extend([f"%{search}%", f"%{search}%"])
-    count_query = query.replace("SELECT id, title, description, status, priority, category, created_at, satisfaction, review", "SELECT COUNT(*)")
-    c.execute(count_query, params)
-    total = c.fetchone()[0]
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-    c.execute(query, params)
+        c.execute("SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets WHERE assigned_to_id=? OR assigned_to_id IS NULL", (user["id"],))
+    else:
+        c.execute("SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets")
     tickets = [{"id": row[0], "title": row[1], "description": row[2], "status": row[3], "priority": row[4],
                 "category": row[5], "created_at": row[6], "satisfaction": row[7], "review": row[8]} for row in c.fetchall()]
     conn.close()
-    return {"tickets": tickets, "total": total, "page": page, "limit": limit}
+    return {"tickets": tickets}
 
 @app.post("/api/tickets")
 def create_ticket(title: str = Form(...), description: str = Form(...), priority: str = Form(...), category: str = Form(""), session: str = Cookie(None)):
@@ -258,10 +239,9 @@ def create_ticket(title: str = Form(...), description: str = Form(...), priority
     c = conn.cursor()
     c.execute("INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) VALUES (?,?,?,?,?,?,?)",
               (title, description, "new", priority, category, datetime.now().isoformat(), user["id"]))
-    ticket_id = c.lastrowid
     conn.commit()
     conn.close()
-    return {"message": "OK", "id": ticket_id}
+    return {"message": "OK"}
 
 @app.put("/api/tickets/{ticket_id}")
 def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None,
@@ -284,7 +264,7 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
             resolved_at = datetime.now().isoformat()
             updates.append("resolved_at=?")
             params.append(resolved_at)
-            # Вычисляем время решения
+            # Расчёт времени решения
             c.execute("SELECT created_at FROM tickets WHERE id=?", (ticket_id,))
             row = c.fetchone()
             if row and row[0]:
@@ -405,6 +385,14 @@ def dashboard_metrics(session: str = Cookie(None)):
     daily = dict(c.fetchall())
     labels = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
     data = [daily.get(d, 0) for d in labels]
+    c.execute("SELECT COUNT(*) FROM tickets WHERE first_response_at IS NOT NULL")
+    total_responded = c.fetchone()[0] or 0
+    if total_responded > 0:
+        c.execute("SELECT COUNT(*) FROM tickets WHERE first_response_at IS NOT NULL AND response_time_minutes <= 480")
+        compliant = c.fetchone()[0]
+        sla_compliance = round(compliant / total_responded * 100, 1)
+    else:
+        sla_compliance = 100.0
     c.execute("SELECT AVG(resolution_time_minutes) FROM tickets WHERE resolution_time_minutes IS NOT NULL AND resolution_time_minutes > 0")
     avg_res = c.fetchone()[0] or 0
     conn.close()
@@ -415,7 +403,8 @@ def dashboard_metrics(session: str = Cookie(None)):
         "status_counts": status_counts,
         "daily_labels": labels,
         "daily_data": data,
-        "avg_resolution_minutes": int(avg_res)
+        "sla_compliance": sla_compliance,
+        "avg_resolution_minutes": round(avg_res, 0)
     }
 
 @app.get("/api/users")
@@ -530,7 +519,7 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
-# ---------------------------- HTML (красивый интерфейс) ----------------------------
+# ---------------------------- HTML (Tailwind, адаптив, графики) ----------------------------
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -539,7 +528,7 @@ def index():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Оптимасеть | Мониторинг качества</title>
+    <title>Quality Monitor Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
@@ -565,7 +554,6 @@ def index():
         input:focus, select:focus, textarea:focus { border-color: #15803d; }
         @media (max-width: 768px) {
             body { padding: 0.5rem; }
-            .container { padding: 0.5rem; }
             .card { padding: 1rem; margin-bottom: 1rem; }
             .tab-btn { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
             .btn-primary { padding: 0.6rem 1rem; font-size: 1rem; }
@@ -581,7 +569,7 @@ def index():
 <body class="light">
 <div class="max-w-7xl mx-auto px-4 py-6 container">
     <div class="flex justify-between items-center mb-8 p-4 bg-white shadow rounded-2xl border">
-        <div class="flex items-center gap-3"><div class="text-3xl">🛜</div><div><h1 class="text-2xl font-bold text-gray-800">ОПТИМАСЕТЬ</h1><p class="text-xs text-gray-500">Мониторинг качества услуг и технической поддержки</p></div></div>
+        <div class="flex items-center gap-3"><div class="text-3xl">📊</div><div><h1 class="text-2xl font-bold text-gray-800">Quality Monitor Pro</h1><p class="text-xs text-gray-500">Мониторинг качества услуг и технической поддержки</p></div></div>
         <div class="flex items-center gap-4">
             <button id="qrButton" class="text-2xl" title="QR-код сайта">📱</button>
             <button id="themeToggle" class="text-2xl">🌙</button>
@@ -635,7 +623,7 @@ def index():
     async function loadUser() {
         try {
             currentUser = await api('/api/me');
-            document.getElementById('userPanel').innerHTML = `<span class="font-medium">${currentUser.name}</span><span class="bg-gray-200 text-gray-800 px-2 py-0.5 rounded-full text-sm">${currentUser.role}</span><button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm" onclick="logout()">Выйти</button>`;
+            document.getElementById('userPanel').innerHTML = `<span class="font-medium">${currentUser.name}</span><span class="bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-sm">${currentUser.role}</span><button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm" onclick="logout()">Выйти</button>`;
             renderUI();
         } catch(e) { currentUser = null; renderLogin(); }
     }
@@ -644,15 +632,23 @@ def index():
 
     function renderLogin() {
         document.getElementById('app').innerHTML = `
-            <div class="max-w-md mx-auto card"><h2 class="text-2xl font-bold mb-4">Вход</h2>
-            <form id="loginForm" class="space-y-4"><div><label class="block text-sm font-medium">Email</label><input id="email" type="email" class="w-full"></div>
-            <div><label class="block text-sm font-medium">Пароль</label><input id="password" type="password" class="w-full"></div>
-            <button type="submit" class="btn-primary w-full">Войти</button></form>
-            <hr class="my-6 border-gray-200"><h3 class="text-xl font-semibold mb-4">Регистрация</h3>
-            <form id="registerForm" class="space-y-4"><div><label class="block text-sm font-medium">Email</label><input id="regEmail" type="email" class="w-full"></div>
-            <div><label class="block text-sm font-medium">ФИО</label><input id="regName" class="w-full"></div>
-            <div><label class="block text-sm font-medium">Пароль</label><input id="regPassword" type="password" class="w-full"></div>
-            <button type="submit" class="btn-primary w-full">Зарегистрироваться</button></form></div>`;
+            <div class="max-w-md mx-auto card">
+                <h2 class="text-2xl font-bold mb-4">Вход</h2>
+                <form id="loginForm" class="space-y-4">
+                    <div><label class="block text-sm font-medium">Email</label><input id="email" type="email" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Пароль</label><input id="password" type="password" class="w-full"></div>
+                    <button type="submit" class="btn-primary w-full">Войти</button>
+                </form>
+                <hr class="my-6 border-gray-200 dark:border-gray-700">
+                <h3 class="text-xl font-semibold mb-4">Регистрация</h3>
+                <form id="registerForm" class="space-y-4">
+                    <div><label class="block text-sm font-medium">Email</label><input id="regEmail" type="email" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">ФИО</label><input id="regName" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Пароль</label><input id="regPassword" type="password" class="w-full"></div>
+                    <button type="submit" class="btn-primary w-full">Зарегистрироваться</button>
+                </form>
+            </div>
+        `;
         document.getElementById('loginForm').onsubmit = async (e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch(e) { notyf.error('Ошибка входа'); } };
         document.getElementById('registerForm').onsubmit = async (e) => { e.preventDefault(); let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value }); await fetch('/api/register', { method:'POST', body:form }); notyf.success('Регистрация успешна, теперь войдите'); };
     }
@@ -695,78 +691,72 @@ def index():
         document.querySelectorAll('.tab-btn').forEach((btn,idx)=>btn.onclick=()=>{ document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.add('hidden')); document.getElementById(`pane-${idx}`).classList.remove('hidden'); });
     }
 
-    // ---------------------------- Рендеры (клиент, оператор, админ, аналитика) ----------------------------
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
         let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ оператора</th><th>Действие</th></tr></thead><tbody>';
         for(let t of data.tickets) {
-            let actionBtn = '';
-            if(t.status === 'resolved' && !t.satisfaction) {
-                actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            }
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description || '—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td><td data-label="Ответ оператора">${t.review ? t.review : '—'}</td><td data-label="Действие">${actionBtn}</td></tr>`;
+            let action = '';
+            if(t.status === 'resolved' && !t.satisfaction) action = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description||'—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие">${action}</td></tr>`;
         }
-        html += `</tbody><table></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.openDetailedReview = async (id) => {
-            const modalHtml = `
-                <div id="reviewModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md">
-                        <h3 class="text-xl font-bold mb-4">Оцените качество обслуживания</h3>
-                        <div class="space-y-4">
-                            <div><label>Общая оценка (1-5)</label><div class="flex gap-1 stars" data-criterion="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div>
-                            <div><label>Скорость ответа (1-5)</label><div class="flex gap-1 stars" data-criterion="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div>
-                            <div><label>Профессионализм (1-5)</label><div class="flex gap-1 stars" data-criterion="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div>
-                            <div><label>Вежливость (1-5)</label><div class="flex gap-1 stars" data-criterion="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div>
-                            <div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div>
-                            <div class="flex justify-end gap-2"><button class="bg-gray-200 px-4 py-2 rounded" onclick="closeModal()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded" onclick="submitDetailedReview(${id})">Отправить</button></div>
-                        </div>
+            const modal = document.createElement('div'); modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md">
+                    <h3 class="text-xl font-bold mb-4">Оцените качество</h3>
+                    <div class="space-y-4">
+                        <div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div>
+                        <div><label>Скорость ответа</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div>
+                        <div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div>
+                        <div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div>
+                        <div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div>
+                        <div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded" onclick="this.closest('#reviewModal').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded" onclick="submitReview(${id})">Отправить</button></div>
                     </div>
                 </div>
             `;
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-            document.querySelectorAll('.stars').forEach(group => {
-                let criterion = group.dataset.criterion;
+            document.body.appendChild(modal);
+            modal.querySelectorAll('.stars').forEach(group => {
+                let crit = group.dataset.crit;
                 group.querySelectorAll('.star').forEach(star => {
-                    star.addEventListener('click', function() {
-                        let val = this.dataset.value;
-                        group.querySelectorAll('.star').forEach(s => s.classList.remove('text-yellow-400'));
-                        this.classList.add('text-yellow-400');
-                        document.getElementById(`${criterion}Val`).value = val;
-                    });
+                    star.onclick = () => {
+                        group.querySelectorAll('.star').forEach(s=>s.style.color='');
+                        star.style.color='#facc15';
+                        document.getElementById(`${crit}Val`).value = star.dataset.val;
+                    };
                 });
             });
-        };
-        window.closeModal = () => { document.getElementById('reviewModal')?.remove(); };
-        window.submitDetailedReview = async (id) => {
-            let overall = document.getElementById('overallVal')?.value;
-            let speed = document.getElementById('speedVal')?.value;
-            let prof = document.getElementById('profVal')?.value;
-            let politeness = document.getElementById('politenessVal')?.value;
-            let comment = document.getElementById('reviewComment')?.value || '';
-            if(!overall || !speed || !prof || !politeness) { notyf.error('Заполните все оценки'); return; }
-            let form = new URLSearchParams({ overall, speed, professionalism:prof, politeness, comment });
-            await api(`/api/tickets/${id}/detailed_review`, 'POST', form);
-            notyf.success('Спасибо за отзыв!');
-            closeModal();
-            renderUI();
+            window.submitReview = async (id) => {
+                let overall = document.getElementById('overallVal')?.value;
+                let speed = document.getElementById('speedVal')?.value;
+                let prof = document.getElementById('profVal')?.value;
+                let politeness = document.getElementById('politenessVal')?.value;
+                let comment = document.getElementById('reviewComment')?.value || '';
+                if(!overall || !speed || !prof || !politeness) { notyf.error('Заполните все оценки'); return; }
+                let form = new URLSearchParams({ overall, speed, professionalism:prof, politeness, comment });
+                await api(`/api/tickets/${id}/detailed_review`, 'POST', form);
+                notyf.success('Спасибо за отзыв!');
+                modal.remove();
+                renderUI();
+            };
         };
     }
 
     function renderNewTicket(container) {
         container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3>
         <form id="newForm" class="space-y-4">
-            <div><label class="block text-sm font-medium">Название</label><input id="title" required></div>
-            <div><label class="block text-sm font-medium">Описание</label><textarea id="desc" rows="3"></textarea></div>
-            <div><label class="block text-sm font-medium">Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
-            <div><label class="block text-sm font-medium">Категория</label><select id="category"></select></div>
-            <button type="submit" class="btn-primary">Создать заявку</button>
+            <div><label>Название</label><input id="title" required></div>
+            <div><label>Описание</label><textarea id="desc" rows="3"></textarea></div>
+            <div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
+            <div><label>Категория</label><select id="category"></select></div>
+            <button type="submit" class="btn-primary">Создать</button>
         </form></div>`;
         fetch('/api/categories').then(r=>r.json()).then(cats=>{ let sel=document.getElementById('category'); cats.forEach(c=>{ let opt=document.createElement('option'); opt.value=c.name; opt.innerText=c.name; sel.appendChild(opt); }); });
         document.getElementById('newForm').onsubmit = async (e) => {
             e.preventDefault();
             let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value, category:document.getElementById('category').value });
-            await api('/api/tickets', 'POST', body);
+            await api('/api/tickets','POST',body);
             notyf.success('Заявка создана');
             renderUI();
         };
@@ -793,45 +783,31 @@ def index():
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
-            if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openResolveModal(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respondTicket(${t.id})">Ответить</button>`;
+            if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description || '—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия">${actions}</td></tr>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description||'—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия">${actions}</td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
-        window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`, 'PUT'); renderUI(); };
-        window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`, 'PUT'); renderUI(); };
-        window.openResolveModal = (id) => {
-            let comment = prompt("Введите комментарий к решению (будет виден клиенту):");
-            if(comment !== null) {
-                api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(comment)}`, 'PUT');
-                notyf.success('Заявка решена, комментарий сохранён');
-                renderUI();
-            }
-        };
-        window.respondTicket = async (id) => {
-            let msg = prompt("Введите ответ по заявке (будет виден клиенту):");
-            if(msg) {
-                await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`, 'PUT');
-                notyf.success('Ответ отправлен');
-                renderUI();
-            }
-        };
+        window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
+        window.resolve = async (id) => { let rev = prompt("Комментарий к решению (будет виден клиенту):"); if(rev !== null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
+        window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`,'PUT'); renderUI(); };
+        window.respond = async (id) => { let msg = prompt("Ответ клиенту:"); if(msg) { await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`,'PUT'); renderUI(); } };
     }
 
     function renderExport(container) {
-        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать заявки CSV</button></a></div>`;
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`;
     }
 
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></td></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
             html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody><td></div>`;
         container.innerHTML = html;
-        window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`, 'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
+        window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
         window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await fetch(`/api/users/${id}`, { method:'DELETE' }); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
     }
 
@@ -846,8 +822,8 @@ def index():
 
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
-        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи системы</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th><tr></thead><tbody>`;
-        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
+        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}<tr><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
         html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
@@ -858,15 +834,17 @@ def index():
         const statusData = Object.values(m.status_counts);
         const dailyLabels = m.daily_labels;
         const dailyData = m.daily_data;
-        const avgResolution = m.avg_resolution_minutes;
+        const slaComp = m.sla_compliance;
+        const avgRes = m.avg_resolution_minutes;
         container.innerHTML = `
             <div class="card">
                 <h3 class="text-xl font-semibold mb-4">📊 Дашборд качества</h3>
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
                     <div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div>
-                    <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Решено / закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs mt-1">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div>
+                    <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs mt-1">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div>
                     <div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div>
-                    <div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Ср. время решения</div><div class="text-3xl font-bold">${avgResolution}<span class="text-lg"> мин</span></div></div>
+                    <div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Соблюдение SLA</div><div class="text-3xl font-bold">${slaComp}%</div></div>
+                    <div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Ср. время решения</div><div class="text-3xl font-bold">${avgRes}<span class="text-lg"> мин</span></div></div>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="statusChartDash" height="200"></canvas></div>
@@ -875,10 +853,9 @@ def index():
                 <div class="text-xs text-gray-500 text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div>
             </div>
         `;
-        const statusColors = { 'new':'#facc15','in_progress':'#3b82f6','resolved':'#22c55e','closed':'#64748b'};
-        const backColors = statusLabels.map(s=>statusColors[s]||'#94a3b8');
-        new Chart(document.getElementById('statusChartDash'), { type:'pie', data:{ labels:statusLabels.map(s=>({new:'Новые',in_progress:'В работе',resolved:'Решённые',closed:'Закрытые'}[s]||s)), datasets:[{ data:statusData, backgroundColor:backColors }] }, options:{ responsive:true, maintainAspectRatio:true } });
-        new Chart(document.getElementById('trendChartDash'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#3b82f6', fill:true, tension:0.3 }] }, options:{ responsive:true } });
+        const colors = { 'new':'#facc15','in_progress':'#3b82f6','resolved':'#22c55e','closed':'#64748b'};
+        new Chart(document.getElementById('statusChartDash'), { type:'pie', data:{ labels:statusLabels.map(s=>({new:'Новые',in_progress:'В работе',resolved:'Решённые',closed:'Закрытые'}[s]||s)), datasets:[{ data:statusData, backgroundColor:statusLabels.map(s=>colors[s]||'#94a3b8') }] }, options:{ responsive:true } });
+        new Chart(document.getElementById('trendChartDash'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#3b82f6', fill:true }] }, options:{ responsive:true } });
     }
 
     async function renderAdvancedDashboard(container) {
@@ -898,42 +875,36 @@ def index():
         <div class="mb-6"><canvas id="operatorChart" height="300"></canvas></div>
         <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div>
         </div>`;
-        const usersRes = await fetch('/api/users');
-        const users = await usersRes.json();
-        const catRes = await fetch('/api/categories');
-        const cats = await catRes.json();
+        const users = await api('/api/users');
+        const cats = await api('/api/categories');
         let opSelect = document.getElementById('operatorFilter');
         opSelect.innerHTML = '<option value="">Все</option>' + users.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}">${u.full_name}</option>`).join('');
         let catSelect = document.getElementById('categoryFilter');
         catSelect.innerHTML = '<option value="">Все</option>' + cats.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
         const loadData = async () => {
             let period = document.getElementById('periodFilter').value;
-            let operator_id = document.getElementById('operatorFilter').value;
-            let category = document.getElementById('categoryFilter').value;
+            let op_id = document.getElementById('operatorFilter').value;
+            let cat = document.getElementById('categoryFilter').value;
             let params = new URLSearchParams({ period });
-            if(operator_id) params.append('operator_id', operator_id);
-            if(category) params.append('category', category);
+            if(op_id) params.append('operator_id', op_id);
+            if(cat) params.append('category', cat);
             let data = await api(`/api/dashboard/advanced_metrics?${params}`);
             document.getElementById('overallAvg').innerText = data.overall_avg;
             document.getElementById('speedAvg').innerText = data.speed_avg;
             document.getElementById('profAvg').innerText = data.prof_avg;
             document.getElementById('politenessAvg').innerText = data.politeness_avg;
             let tableHtml = '';
-            const operatorColors = ['#3b82f6', '#ef4444', '#22c55e', '#facc15', '#a855f7', '#ec4899', '#14b8a6', '#f97316'];
+            const opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
             for(let op of data.operator_stats) {
-                let badgeColor = op.overall_avg >= 4.5 ? 'bg-green-100 text-green-800' : (op.overall_avg >= 3 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');
-                tableHtml += `<tr><td class="font-medium">${op.name}</td><td class="text-center">${op.count}</td><td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badgeColor}">${op.overall_avg}</span></td><td class="text-center">${op.speed_avg}</td><td class="text-center">${op.prof_avg}</td><td class="text-center">${op.politeness_avg}</td></tr>`;
+                let badge = op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
+                tableHtml += `<tr><td class="font-medium">${op.name}</td><td>${op.count}</td><td><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span></td><td>${op.speed_avg}</td><td>${op.prof_avg}</td><td>${op.politeness_avg}</td></tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
             const ctx = document.getElementById('operatorChart').getContext('2d');
             if(window.opChart) window.opChart.destroy();
             let labels = data.operator_stats.map(o=>o.name);
             let overalls = data.operator_stats.map(o=>o.overall_avg);
-            window.opChart = new Chart(ctx, {
-                type: 'bar',
-                data: { labels, datasets: [{ label: 'Общая оценка', data: overalls, backgroundColor: labels.map((_, idx) => operatorColors[idx % operatorColors.length]), borderRadius: 8 }] },
-                options: { responsive: true, maintainAspectRatio: true }
-            });
+            window.opChart = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'Общая оценка', data:overalls, backgroundColor:labels.map((_,i)=>opColors[i%opColors.length]) }] } });
         };
         document.getElementById('applyFilters').addEventListener('click', loadData);
         loadData();
