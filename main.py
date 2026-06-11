@@ -2,6 +2,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Form, Cookie, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from datetime import datetime, timedelta
 import sqlite3
 import secrets
@@ -10,7 +11,11 @@ import io
 
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
+# ------------------------------------------------------------
+# Инициализация базы данных с тестовыми заявками и пользователями
+# ------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
@@ -96,16 +101,18 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
-    # Пользователи
+    # Предустановленные пользователи
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
+    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
+    
     # Получаем id оператора
     c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
     op_row = c.fetchone()
     operator_id = op_row[0] if op_row else 2
 
-    # Тестовые заявки
+    # Тестовые заявки (15 штук)
     c.execute("SELECT COUNT(*) FROM tickets")
     if c.fetchone()[0] == 0:
         now = datetime.now()
@@ -131,7 +138,6 @@ def init_db():
                 (title, description, status, priority, category, created_at, assigned_to_id, review, satisfaction)
                 VALUES (?,?,?,?,?,?,?,?,?)""", t)
             ticket_id = c.lastrowid
-            # Детальная оценка
             overall = t[8]
             if overall == 5:
                 speed = prof = politeness = 5
@@ -143,19 +149,17 @@ def init_db():
                 (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at)
                 VALUES (?,?,?,?,?,?,?)""",
                 (ticket_id, overall, speed, prof, politeness, t[7], (now - timedelta(days=1)).isoformat()))
-            # Установим resolved_at и resolution_time_minutes
             resolved_at = (now - timedelta(days=1)).isoformat()
             created_at = t[5]
             created_dt = datetime.fromisoformat(created_at)
             resolved_dt = datetime.fromisoformat(resolved_at)
             resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
             c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
-        # Две активные заявки
+        # Активные заявки
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
                     VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
                     VALUES ('Проблема с биллингом', 'Двойное списание за услуги', 'in_progress', 'critical', 'Доступ и права', ?, 2)""", (now.isoformat(),))
-
     conn.commit()
     conn.close()
 
@@ -264,7 +268,6 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
             resolved_at = datetime.now().isoformat()
             updates.append("resolved_at=?")
             params.append(resolved_at)
-            # Расчёт времени решения
             c.execute("SELECT created_at FROM tickets WHERE id=?", (ticket_id,))
             row = c.fetchone()
             if row and row[0]:
@@ -407,9 +410,10 @@ def dashboard_metrics(session: str = Cookie(None)):
         "avg_resolution_minutes": round(avg_res, 0)
     }
 
+# Разрешаем доступ к списку пользователей для admin и quality
 @app.get("/api/users")
 def get_users(session: str = Cookie(None)):
-    if not session or session not in sessions or sessions[session]["role"] != "admin":
+    if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
         raise HTTPException(403)
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
@@ -519,7 +523,9 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
-# ---------------------------- HTML (Tailwind, адаптив, графики) ----------------------------
+# ------------------------------------------------------------
+# HTML (полный интерфейс)
+# ------------------------------------------------------------
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -554,6 +560,7 @@ def index():
         input:focus, select:focus, textarea:focus { border-color: #15803d; }
         @media (max-width: 768px) {
             body { padding: 0.5rem; }
+            .container { padding: 0.5rem; }
             .card { padding: 1rem; margin-bottom: 1rem; }
             .tab-btn { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
             .btn-primary { padding: 0.6rem 1rem; font-size: 1rem; }
@@ -779,7 +786,7 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><td><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
@@ -803,9 +810,9 @@ def index():
         let users = await api('/api/users');
         let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></td>`;
         }
-        html += `</tbody><td></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
         window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await fetch(`/api/users/${id}`, { method:'DELETE' }); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
@@ -823,7 +830,7 @@ def index():
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
         let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
-        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}<tr><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
+        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
         html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
@@ -897,7 +904,7 @@ def index():
             const opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
             for(let op of data.operator_stats) {
                 let badge = op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
-                tableHtml += `<tr><td class="font-medium">${op.name}</td><td>${op.count}</td><td><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span></td><td>${op.speed_avg}</td><td>${op.prof_avg}</td><td>${op.politeness_avg}</td></tr>`;
+                tableHtml += `<td><td class="font-medium">${op.name}</td><td class="text-center">${op.count}</td><td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span></td><td class="text-center">${op.speed_avg}</td><td class="text-center">${op.prof_avg}</td><td class="text-center">${op.politeness_avg}</td></tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
             const ctx = document.getElementById('operatorChart').getContext('2d');
@@ -919,4 +926,5 @@ def index():
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8080))
+    print(f"\n🚀 Сервер Оптимасеть запущен на порту {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
