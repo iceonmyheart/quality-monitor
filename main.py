@@ -16,6 +16,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 def init_db():
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
+    # --- Таблицы ---
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE,
@@ -89,6 +90,7 @@ def init_db():
         category_id INTEGER,
         created_at TEXT
     )''')
+    # Начальные настройки
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Технические проблемы')")
@@ -96,16 +98,69 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
+    # Предустановленные пользователи
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
+
+    # Получаем id оператора
+    c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
+    op_row = c.fetchone()
+    operator_id = op_row[0] if op_row else 2
+
+    # --- Добавляем 15 тестовых заявок, если таблица пуста ---
+    c.execute("SELECT COUNT(*) FROM tickets")
+    if c.fetchone()[0] == 0:
+        now = datetime.now()
+        test_tickets = [
+            ("Не работает Wi-Fi в офисе", "С утра пропал Wi-Fi на всех устройствах. Роутер перезагружали – не помогло.", "resolved", "high", "Технические проблемы", (now - timedelta(days=1)).isoformat(), operator_id, "Проверили оборудование, проблема в настройках DNS. Восстановили доступ.", 4),
+            ("Не грузит CRM-система", "При входе в CRM вылетает ошибка 500. Работа встала.", "resolved", "critical", "Технические проблемы", (now - timedelta(days=2)).isoformat(), operator_id, "Обнаружен сбой на сервере БД. Перезапустили службы. Ошибка устранена.", 5),
+            ("Тормозит видеоконференция", "При звонках в Zoom постоянные задержки и разрывы.", "resolved", "medium", "Технические проблемы", (now - timedelta(days=3)).isoformat(), operator_id, "Проблема в настройках QoS вашего роутера. Оптимизировали трафик.", 4),
+            ("Не отправляется почта через Outlook", "Исходящие письма зависают в очереди.", "resolved", "high", "Технические проблемы", (now - timedelta(days=4)).isoformat(), operator_id, "Обновили настройки SMTP-сервера. Всё должно работать.", 5),
+            ("Не синхронизируется OneDrive", "Папка на рабочем столе не синхронизируется с облаком.", "resolved", "low", "Технические проблемы", (now - timedelta(days=5)).isoformat(), operator_id, "Сбросили кэш OneDrive. Рекомендуем обновить приложение.", 3),
+            ("Как настроить автоответ в Outlook?", "Нужна инструкция по настройке автоответчика.", "resolved", "low", "Консультации", (now - timedelta(days=6)).isoformat(), operator_id, "Инструкция: Файл → Автоответчик → Включить. Настройте текст.", 5),
+            ("Какие тарифы интернета для дома?", "Хочу подключить домашний интернет. Нужна консультация.", "resolved", "low", "Консультации", (now - timedelta(days=7)).isoformat(), operator_id, "Тарифы: 'Старт' 100 Мбит/с – 500 руб., 'Оптима' 300 Мбит/с – 700 руб.", 4),
+            ("Как восстановить пароль от личного кабинета?", "Не приходит письмо для сброса.", "resolved", "medium", "Консультации", (now - timedelta(days=8)).isoformat(), operator_id, "Отправили одноразовую ссылку на резервный email.", 5),
+            ("Выбор оборудования для офиса", "Нужен роутер и коммутаторы на 20 пользователей.", "resolved", "medium", "Консультации", (now - timedelta(days=9)).isoformat(), operator_id, "Рекомендуем MikroTik hAP ac2 + 2 коммутатора TP-Link.", 4),
+            ("Обучение работе в CRM", "Нужна консультация по основным функциям.", "resolved", "low", "Консультации", (now - timedelta(days=10)).isoformat(), operator_id, "Запишитесь на вебинар в четверг в 11:00. Видеоуроки в базе знаний.", 5),
+            ("Нет доступа к общей папке", "После смены пароля потерял доступ к \\\\server\\docs", "resolved", "high", "Доступ и права", (now - timedelta(days=11)).isoformat(), operator_id, "Ваша учётная запись повторно добавлена в группу доступа. Перезагрузите компьютер.", 5),
+            ("Не могу установить программу", "При установке требует прав администратора.", "resolved", "medium", "Доступ и права", (now - timedelta(days=12)).isoformat(), operator_id, "Создали заявку на удалённую установку. Программа будет установлена в течение часа.", 4),
+            ("Доступ к БД клиентов", "Менеджеру нужен доступ к таблице clients.", "resolved", "high", "Доступ и права", (now - timedelta(days=13)).isoformat(), operator_id, "Учётная запись с правами SELECT создана. Данные отправлены в личное сообщение.", 5),
+            ("Не работает VPN после обновления", "Ошибка аутентификации при подключении.", "resolved", "critical", "Доступ и права", (now - timedelta(days=14)).isoformat(), operator_id, "Перевыпустили сертификат. Приложили новый файл. Установите его.", 5),
+            ("Добавить сотрудника в группу Бухгалтерия", "Нужен доступ к 1С и общим папкам.", "resolved", "medium", "Доступ и права", (now - timedelta(days=15)).isoformat(), operator_id, "Создали учётную запись, добавили в группу. Логин отправлен руководителю.", 5),
+        ]
+        for t in test_tickets:
+            c.execute("""INSERT INTO tickets 
+                (title, description, status, priority, category, created_at, assigned_to_id, review, satisfaction)
+                VALUES (?,?,?,?,?,?,?,?,?)""", t)
+            ticket_id = c.lastrowid
+            # Детальная оценка (если есть удовлетворённость)
+            if t[8]:
+                overall = t[8]
+                # Примерное распределение оценок по критериям (можно настроить)
+                if overall == 5:
+                    speed = prof = politeness = 5
+                elif overall == 4:
+                    speed = prof = politeness = 4
+                else:
+                    speed = prof = politeness = 3
+                c.execute("""INSERT INTO detailed_reviews 
+                    (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at)
+                    VALUES (?,?,?,?,?,?,?)""",
+                    (ticket_id, overall, speed, prof, politeness, t[7], (now - timedelta(days=1)).isoformat()))
+        # Добавляем пару активных заявок
+        c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
+                    VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
+        c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
+                    VALUES ('Проблема с биллингом', 'Двойное списание за услуги', 'in_progress', 'critical', 'Доступ и права', ?, 2)""", (now.isoformat(),))
+
     conn.commit()
     conn.close()
 
 init_db()
 sessions = {}
 
-# ---------------------------------------- API ----------------------------------------
+# ---------------------------- API ----------------------------
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...)):
     if email == "admin@mail.ru":
@@ -164,7 +219,7 @@ def get_tickets(session: str = Cookie(None), page: int = 1, limit: int = 10,
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     offset = (page - 1) * limit
-    query = "SELECT id, title, description, status, priority, category, created_at, satisfaction, review, assigned_to_id, created_by_id FROM tickets WHERE 1=1"
+    query = "SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets WHERE 1=1"
     params = []
     if user["role"] == "client":
         query += " AND created_by_id = ?"
@@ -181,20 +236,14 @@ def get_tickets(session: str = Cookie(None), page: int = 1, limit: int = 10,
     if search:
         query += " AND (title LIKE ? OR description LIKE ?)"
         params.extend([f"%{search}%", f"%{search}%"])
-    count_query = query.replace("SELECT id, title, description, status, priority, category, created_at, satisfaction, review, assigned_to_id, created_by_id", "SELECT COUNT(*)")
+    count_query = query.replace("SELECT id, title, description, status, priority, category, created_at, satisfaction, review", "SELECT COUNT(*)")
     c.execute(count_query, params)
     total = c.fetchone()[0]
     query += " ORDER BY id DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     c.execute(query, params)
-    tickets = []
-    for row in c.fetchall():
-        tickets.append({
-            "id": row[0], "title": row[1], "description": row[2], "status": row[3],
-            "priority": row[4], "category": row[5], "created_at": row[6],
-            "satisfaction": row[7], "review": row[8], "assigned_to_id": row[9],
-            "created_by_id": row[10]
-        })
+    tickets = [{"id": row[0], "title": row[1], "description": row[2], "status": row[3], "priority": row[4],
+                "category": row[5], "created_at": row[6], "satisfaction": row[7], "review": row[8]} for row in c.fetchall()]
     conn.close()
     return {"tickets": tickets, "total": total, "page": page, "limit": limit}
 
@@ -229,18 +278,9 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
             assigned_to_id = user["id"]
             updates.append("first_response_at=?")
             params.append(datetime.now().isoformat())
-            updates.append("response_time_minutes=?")
-            params.append(0)
         if status == "resolved":
             updates.append("resolved_at=?")
             params.append(datetime.now().isoformat())
-            # calculate resolution time
-            c.execute("SELECT created_at FROM tickets WHERE id=?", (ticket_id,))
-            created = c.fetchone()[0]
-            if created:
-                mins = (datetime.now() - datetime.fromisoformat(created)).total_seconds() / 60
-                updates.append("resolution_time_minutes=?")
-                params.append(int(mins))
         if status == "closed":
             updates.append("closed_at=?")
             params.append(datetime.now().isoformat())
@@ -273,17 +313,6 @@ def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = F
     conn.commit()
     conn.close()
     return {"message": "OK"}
-
-@app.get("/api/tickets/{ticket_id}/detailed_review")
-def get_detailed_review(ticket_id: int):
-    conn = sqlite3.connect("monitoring.db")
-    c = conn.cursor()
-    c.execute("SELECT overall_rating, speed_rating, professionalism_rating, politeness_rating, comment FROM detailed_reviews WHERE ticket_id=? ORDER BY id DESC LIMIT 1", (ticket_id,))
-    row = c.fetchone()
-    conn.close()
-    if row:
-        return {"overall": row[0], "speed": row[1], "professionalism": row[2], "politeness": row[3], "comment": row[4]}
-    return None
 
 @app.get("/api/dashboard/advanced_metrics")
 def advanced_metrics(period: str = "month", operator_id: int = None, category: str = None, session: str = Cookie(None)):
@@ -490,17 +519,18 @@ def export_tickets(session: str = Cookie(None)):
         raise HTTPException(401)
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
-    c.execute("SELECT id, title, status, priority, created_at, satisfaction, review FROM tickets")
+    c.execute("SELECT id, title, description, status, priority, created_at, satisfaction, review FROM tickets")
     rows = c.fetchall()
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID", "Title", "Status", "Priority", "Created", "Satisfaction", "OperatorComment"])
+    writer.writerow(["ID", "Title", "Description", "Status", "Priority", "Created", "Satisfaction", "Operator Response"])
     for r in rows:
-        writer.writerow([r[0], r[1], r[2], r[3], r[4], r[5] if r[5] else "", r[6] or ""])
+        writer.writerow([r[0], r[1], r[2], r[3], r[4], r[5], r[6] if r[6] else "", r[7] or ""])
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
+# ---------------------------------------- HTML (фронтенд) ----------------------------------------
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -552,9 +582,21 @@ def index():
 <div class="max-w-7xl mx-auto px-4 py-6 container">
     <div class="flex justify-between items-center mb-8 p-4 bg-white shadow rounded-2xl border">
         <div class="flex items-center gap-3"><div class="text-3xl">🛜</div><div><h1 class="text-2xl font-bold text-gray-800">ОПТИМАСЕТЬ</h1><p class="text-xs text-gray-500">Мониторинг качества услуг и технической поддержки</p></div></div>
-        <div class="flex items-center gap-4"><button id="themeToggle" class="text-2xl">🌙</button><div id="userPanel"></div></div>
+        <div class="flex items-center gap-4">
+            <button id="qrButton" class="text-2xl" title="QR-код сайта">📱</button>
+            <button id="themeToggle" class="text-2xl">🌙</button>
+            <div id="userPanel"></div>
+        </div>
     </div>
     <div id="app"></div>
+</div>
+<div id="qrModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 text-center max-w-sm">
+        <h3 class="text-lg font-bold mb-2">QR-код ссылки на сайт</h3>
+        <img id="qrImage" src="" alt="QR Code" class="mx-auto my-4">
+        <p class="text-sm break-all" id="qrUrl"></p>
+        <button class="mt-4 bg-gray-500 text-white px-4 py-2 rounded" onclick="document.getElementById('qrModal').classList.add('hidden')">Закрыть</button>
+    </div>
 </div>
 <script>
     let currentUser = null;
@@ -568,6 +610,13 @@ def index():
     }
     applyTheme();
     document.getElementById('themeToggle').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; applyTheme(); };
+    document.getElementById('qrButton').addEventListener('click', function() {
+        let url = window.location.href;
+        let qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+        document.getElementById('qrImage').src = qrSrc;
+        document.getElementById('qrUrl').innerText = url;
+        document.getElementById('qrModal').classList.remove('hidden');
+    });
 
     async function api(url, method='GET', body=null) {
         let opts = { method };
@@ -649,25 +698,13 @@ def index():
     // ---------------------------- Рендеры ----------------------------
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Ответ оператора</th><th>Оценка</th><th>Отзыв</th><th></th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ оператора</th><th>Действие</th></tr></thead><tbody>';
         for(let t of data.tickets) {
-            let reviewShort = t.review ? t.review.substring(0,60)+(t.review.length>60?'…':'') : '—';
             let actionBtn = '';
             if(t.status === 'resolved' && !t.satisfaction) {
-                actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить качество</button>`;
+                actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
             }
-            html += `<tr>
-                <td data-label="Номер">${t.id}</td>
-                <td data-label="Название">${t.title}</td>
-                <td data-label="Описание">${t.description ? t.description.substring(0,40)+(t.description.length>40?'…':'') : '—'}</td>
-                <td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td>
-                <td data-label="Приоритет">${t.priority}</td>
-                <td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td>
-                <td data-label="Ответ оператора">${reviewShort}</td>
-                <td data-label="Оценка">${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td>
-                <td data-label="Отзыв">${t.review ? t.review.substring(0,40) : '—'}</td>
-                <td data-label="Действие">${actionBtn}</td>
-            </tr>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description || '—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td><td data-label="Ответ оператора">${t.review ? t.review : '—'}</td><td data-label="Действие">${actionBtn}</td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -677,11 +714,11 @@ def index():
                     <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md">
                         <h3 class="text-xl font-bold mb-4">Оцените качество обслуживания</h3>
                         <div class="space-y-4">
-                            <div><label class="block font-medium">Общая оценка (1-5)</label><div class="flex gap-1 stars" data-criterion="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div>
-                            <div><label class="block font-medium">Скорость ответа (1-5)</label><div class="flex gap-1 stars" data-criterion="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div>
-                            <div><label class="block font-medium">Профессионализм (1-5)</label><div class="flex gap-1 stars" data-criterion="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div>
-                            <div><label class="block font-medium">Вежливость (1-5)</label><div class="flex gap-1 stars" data-criterion="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div>
-                            <div><label class="block font-medium">Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div>
+                            <div><label>Общая оценка (1-5)</label><div class="flex gap-1 stars" data-criterion="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div>
+                            <div><label>Скорость ответа</label><div class="flex gap-1 stars" data-criterion="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div>
+                            <div><label>Профессионализм</label><div class="flex gap-1 stars" data-criterion="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div>
+                            <div><label>Вежливость</label><div class="flex gap-1 stars" data-criterion="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer text-gray-400 hover:text-yellow-400" data-value="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div>
+                            <div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div>
                             <div class="flex justify-end gap-2"><button class="bg-gray-200 px-4 py-2 rounded" onclick="closeModal()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded" onclick="submitDetailedReview(${id})">Отправить</button></div>
                         </div>
                     </div>
@@ -719,10 +756,10 @@ def index():
     function renderNewTicket(container) {
         container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3>
         <form id="newForm" class="space-y-4">
-            <div><label class="block text-sm font-medium">Название</label><input id="title" required></div>
-            <div><label class="block text-sm font-medium">Описание</label><textarea id="desc" rows="3"></textarea></div>
-            <div><label class="block text-sm font-medium">Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
-            <div><label class="block text-sm font-medium">Категория</label><select id="category"></select></div>
+            <div><label>Название</label><input id="title" required></div>
+            <div><label>Описание</label><textarea id="desc" rows="3"></textarea></div>
+            <div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
+            <div><label>Категория</label><select id="category"></select></div>
             <button type="submit" class="btn-primary">Создать заявку</button>
         </form></div>`;
         fetch('/api/categories').then(r=>r.json()).then(cats=>{ let sel=document.getElementById('category'); cats.forEach(c=>{ let opt=document.createElement('option'); opt.value=c.name; opt.innerText=c.name; sel.appendChild(opt); }); });
@@ -756,32 +793,30 @@ def index():
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
-            if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
+            if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openResolveModal(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respondTicket(${t.id})">Ответить</button>`;
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr>
-                <td data-label="Номер">${t.id}</td>
-                <td data-label="Название">${t.title}</td>
-                <td data-label="Описание">${t.description ? t.description.substring(0,40)+(t.description.length>40?'…':'') : '—'}</td>
-                <td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td>
-                <td data-label="Приоритет">${t.priority}</td>
-                <td data-label="Действия">${actions}</td>
-            </tr>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description || '—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия">${actions}</td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`, 'PUT'); renderUI(); };
-        window.resolve = async (id) => { 
-            let comment = prompt("Введите ответ/решение, который увидит клиент:");
-            if(comment !== null) {
-                await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(comment||'')}`, 'PUT');
-                notyf.success('Заявка решена, ответ отправлен');
-            } else {
-                await api(`/api/tickets/${id}?status=resolved`, 'PUT');
-            }
-            renderUI(); 
-        };
         window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`, 'PUT'); renderUI(); };
-        window.respond = async (id) => { let msg = prompt("Введите промежуточный ответ (будет виден клиенту):"); if(msg) { await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`, 'PUT'); notyf.success("Ответ сохранён"); renderUI(); } };
+        window.openResolveModal = (id) => {
+            let comment = prompt("Введите комментарий к решению (будет виден клиенту):");
+            if(comment !== null) {
+                api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(comment)}`, 'PUT');
+                notyf.success('Заявка решена, комментарий сохранён');
+                renderUI();
+            }
+        };
+        window.respondTicket = async (id) => {
+            let msg = prompt("Введите ответ по заявке (будет виден клиенту):");
+            if(msg) {
+                await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`, 'PUT');
+                notyf.success('Ответ отправлен');
+                renderUI();
+            }
+        };
     }
 
     function renderExport(container) {
@@ -792,7 +827,7 @@ def index():
         let users = await api('/api/users');
         let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
+            html += `<td><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -812,7 +847,7 @@ def index():
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
         let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи системы</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
-        for(let l of logs) html += `<tr><td>${new Date(l.time).toLocaleString()}</td><td>${l.user_id}</td><td>${l.action}</td><td>${l.details||''}</td></tr>`;
+        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
         html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
@@ -827,7 +862,7 @@ def index():
         const avgResolution = m.avg_resolution_minutes;
         container.innerHTML = `
             <div class="card">
-                <h3 class="text-xl font-semibold mb-4 text-gray-800 dark:text-white">📊 Дашборд качества</h3>
+                <h3 class="text-xl font-semibold mb-4">📊 Дашборд качества</h3>
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
                     <div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div>
                     <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Решено / закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs mt-1">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div>
@@ -886,15 +921,21 @@ def index():
             document.getElementById('profAvg').innerText = data.prof_avg;
             document.getElementById('politenessAvg').innerText = data.politeness_avg;
             let tableHtml = '';
+            const operatorColors = ['#3b82f6', '#ef4444', '#22c55e', '#facc15', '#a855f7', '#ec4899', '#14b8a6', '#f97316'];
             for(let op of data.operator_stats) {
-                tableHtml += `<tr><td data-label="Оператор">${op.name}</td><td data-label="Оценок">${op.count}</td><td data-label="Общая">${op.overall_avg}</td><td data-label="Скорость">${op.speed_avg}</td><td data-label="Проф.">${op.prof_avg}</td><td data-label="Вежливость">${op.politeness_avg}</td></tr>`;
+                let badgeColor = op.overall_avg >= 4.5 ? 'bg-green-100 text-green-800' : (op.overall_avg >= 3 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');
+                tableHtml += `<tr><td class="font-medium">${op.name}</td><td>${op.count}</td><td><span class="px-2 py-1 rounded-full text-sm ${badgeColor}">${op.overall_avg}</span></td><td>${op.speed_avg}</td><td>${op.prof_avg}</td><td>${op.politeness_avg}</td></tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
             const ctx = document.getElementById('operatorChart').getContext('2d');
             if(window.opChart) window.opChart.destroy();
             let labels = data.operator_stats.map(o=>o.name);
             let overalls = data.operator_stats.map(o=>o.overall_avg);
-            window.opChart = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'Общая оценка', data:overalls, backgroundColor:'#15803d' }] } });
+            window.opChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels, datasets: [{ label: 'Общая оценка', data: overalls, backgroundColor: labels.map((_, idx) => operatorColors[idx % operatorColors.length]), borderRadius: 8 }] },
+                options: { responsive: true, maintainAspectRatio: true }
+            });
         };
         document.getElementById('applyFilters').addEventListener('click', loadData);
         loadData();
