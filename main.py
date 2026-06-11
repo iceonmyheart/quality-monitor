@@ -14,6 +14,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 def init_db():
     conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
+    # Таблицы
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE,
@@ -87,6 +88,7 @@ def init_db():
         category_id INTEGER,
         created_at TEXT
     )''')
+    # Начальные данные
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Технические проблемы')")
@@ -99,6 +101,65 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
+
+    # Получаем id оператора и клиента для привязки заявок
+    c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
+    op_row = c.fetchone()
+    operator_id = op_row[0] if op_row else 2
+    c.execute("SELECT id FROM users WHERE email='client@example.com'")
+    client_row = c.fetchone()
+    client_id = client_row[0] if client_row else 1
+
+    # Добавляем 15 тестовых заявок, если таблица пуста
+    c.execute("SELECT COUNT(*) FROM tickets")
+    if c.fetchone()[0] == 0:
+        now = datetime.now()
+        test_tickets = [
+            # Технические проблемы (5 шт)
+            ("Не работает Wi-Fi в офисе", "С утра пропал Wi-Fi на всех устройствах. Роутер перезагружали – не помогло.", "resolved", "high", "Технические проблемы", (now - timedelta(days=1)).isoformat(), operator_id, client_id, "Проверили оборудование, проблема в настройках DNS. Восстановили доступ. Перезагрузите роутер ещё раз.", 4),
+            ("Не грузит CRM-система", "При входе в CRM вылетает ошибка 500. Работа встала.", "resolved", "critical", "Технические проблемы", (now - timedelta(days=2)).isoformat(), operator_id, client_id, "Обнаружен сбой на сервере БД. Перезапустили службы. Ошибка устранена. Проверьте.", 5),
+            ("Тормозит видеоконференция", "При звонках в Zoom постоянные задержки и разрывы.", "resolved", "medium", "Технические проблемы", (now - timedelta(days=3)).isoformat(), operator_id, client_id, "Проблема в настройках QoS вашего роутера. Оптимизировали трафик.", 4),
+            ("Не отправляется почта через Outlook", "Исходящие письма зависают в очереди.", "resolved", "high", "Технические проблемы", (now - timedelta(days=4)).isoformat(), operator_id, client_id, "Обновили настройки SMTP-сервера. Проверьте отправку.", 5),
+            ("Не синхронизируется OneDrive", "Папка не синхронизируется с облаком.", "resolved", "low", "Технические проблемы", (now - timedelta(days=5)).isoformat(), operator_id, client_id, "Сбросили кэш OneDrive. Рекомендуем обновить приложение.", 3),
+            # Консультации (5 шт)
+            ("Как настроить автоответ в Outlook?", "Нужна инструкция.", "resolved", "low", "Консультации", (now - timedelta(days=6)).isoformat(), operator_id, client_id, "Инструкция: Файл → Автоответчик → Включить. Текст настройте сами.", 5),
+            ("Какие тарифы интернета для дома?", "Хочу подключить интернет.", "resolved", "low", "Консультации", (now - timedelta(days=7)).isoformat(), operator_id, client_id, "Тарифы: 'Старт' 100 Мбит/с – 500 руб., 'Оптима' 300 Мбит/с – 700 руб.", 4),
+            ("Как восстановить пароль от личного кабинета?", "Не приходит письмо для сброса.", "resolved", "medium", "Консультации", (now - timedelta(days=8)).isoformat(), operator_id, client_id, "Отправили одноразовую ссылку на резервный email.", 5),
+            ("Выбор оборудования для офиса", "Нужен роутер и коммутаторы на 20 пользователей.", "resolved", "medium", "Консультации", (now - timedelta(days=9)).isoformat(), operator_id, client_id, "Рекомендуем MikroTik hAP ac2 + 2 коммутатора TP-Link.", 4),
+            ("Обучение работе в CRM", "Нужна консультация по функциям.", "resolved", "low", "Консультации", (now - timedelta(days=10)).isoformat(), operator_id, client_id, "Запишитесь на вебинар в четверг в 11:00. Видеоуроки в базе знаний.", 5),
+            # Доступ и права (5 шт)
+            ("Нет доступа к общей папке", "После смены пароля потерял доступ к \\\\server\\docs", "resolved", "high", "Доступ и права", (now - timedelta(days=11)).isoformat(), operator_id, client_id, "Ваша учётная запись повторно добавлена в группу доступа. Перезагрузите компьютер.", 5),
+            ("Не могу установить программу", "Требует прав администратора.", "resolved", "medium", "Доступ и права", (now - timedelta(days=12)).isoformat(), operator_id, client_id, "Создали заявку на удалённую установку. Программа будет установлена в течение часа.", 4),
+            ("Доступ к БД клиентов", "Менеджеру нужен доступ к таблице clients.", "resolved", "high", "Доступ и права", (now - timedelta(days=13)).isoformat(), operator_id, client_id, "Учётная запись с правами SELECT создана. Данные отправлены в личное сообщение.", 5),
+            ("Не работает VPN после обновления", "Ошибка аутентификации.", "resolved", "critical", "Доступ и права", (now - timedelta(days=14)).isoformat(), operator_id, client_id, "Перевыпустили сертификат. Приложили новый файл. Установите его.", 5),
+            ("Добавить сотрудника в группу Бухгалтерия", "Нужен доступ к 1С и общим папкам.", "resolved", "medium", "Доступ и права", (now - timedelta(days=15)).isoformat(), operator_id, client_id, "Создали учётную запись, добавили в группу. Логин отправлен руководителю.", 5),
+        ]
+        for t in test_tickets:
+            # Вставляем заявку
+            c.execute("""INSERT INTO tickets 
+                (title, description, status, priority, category, created_at, assigned_to_id, created_by_id, review, satisfaction, resolved_at, resolution_time_minutes)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[5], 60))  # resolution_time_minutes = 60 для примера
+            ticket_id = c.lastrowid
+            # Добавляем детальную оценку, если satisfaction > 0
+            if t[9]:
+                overall = t[9]
+                if overall == 5:
+                    speed = prof = politeness = 5
+                elif overall == 4:
+                    speed = prof = politeness = 4
+                else:
+                    speed = prof = politeness = 3
+                c.execute("""INSERT INTO detailed_reviews 
+                    (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at)
+                    VALUES (?,?,?,?,?,?,?)""",
+                    (ticket_id, overall, speed, prof, politeness, t[8], datetime.now().isoformat()))
+        # Добавляем пару активных заявок для демонстрации
+        c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
+                    VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, ?)""", (now.isoformat(), client_id))
+        c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
+                    VALUES ('Проблема с биллингом', 'Двойное списание за услуги', 'in_progress', 'critical', 'Доступ и права', ?, ?)""", (now.isoformat(), operator_id))
+
     conn.commit()
     conn.close()
 
@@ -244,7 +305,6 @@ def dashboard_metrics(session: str = Cookie(None)):
     resolved = c.fetchone()[0]
     c.execute("SELECT AVG(satisfaction) FROM tickets WHERE satisfaction IS NOT NULL")
     avg_sat = c.fetchone()[0] or 0
-    # Среднее время решения (в минутах)
     c.execute("SELECT AVG(resolution_time_minutes) FROM tickets WHERE resolution_time_minutes IS NOT NULL AND resolution_time_minutes > 0")
     avg_res = c.fetchone()[0] or 0
     conn.close()
@@ -402,9 +462,9 @@ def index():
 
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<tr><thead><tr><th>ID</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ</th></tr></thead><tbody>`;
+        let html = `<table><thead><tr><th>ID</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ</th></td></thead><tbody>`;
         for (let t of data.tickets) {
-            html += `<tr><td>${t.id}</td><td>${t.title}</td><td>${t.description || '—'}</td><td><span class="status-badge status-${t.status}">${t.status}</span></td><td>${t.priority}</td><td>${new Date(t.created_at).toLocaleDateString()}</td><td>${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td><td>${t.review || '—'}</td></tr>`;
+            html += `<tr><td data-label="ID">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description || '—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction ? '⭐'+t.satisfaction : '—'}</td><td data-label="Ответ">${t.review || '—'}</td></tr>`;
         }
         html += `</tbody></table>`;
         container.innerHTML = html;
@@ -433,13 +493,13 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = `<table><thead><tr><th>ID</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
+        let html = `</table><thead><tr><th>ID</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>`;
         for (let t of data.tickets) {
             let actions = '';
             if (t.status === 'new') actions = `<button onclick="assign(${t.id})">Принять</button>`;
             if (t.status === 'in_progress') actions = `<button onclick="resolve(${t.id})">Решить</button> <button onclick="respond(${t.id})">Ответить</button>`;
             if (t.status === 'resolved') actions = `<button onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr><td>${t.id}</td><td>${t.title}</td><td>${t.description || '—'}</td><td><span class="status-badge status-${t.status}">${t.status}</span></td><td>${t.priority}</td><td>${actions}</td></tr>`;
+            html += `<tr><td data-label="ID">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description || '—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия">${actions}</td></tr>`;
         }
         html += `</tbody></table>`;
         container.innerHTML = html;
