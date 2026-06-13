@@ -9,20 +9,16 @@ import secrets
 import csv
 import io
 import os
-import sys
 import re
 import traceback
 
 # ------------------------------------------------------------
-# Очистка суррогатных символов (главное исправление)
+# Очистка суррогатных символов
 # ------------------------------------------------------------
 def clean_text(text: str) -> str:
-    """Удаляет суррогатные символы (U+D800–U+DFFF) и любые невалидные последовательности."""
     if not text:
         return ""
-    # Удаляем суррогаты
     text = re.sub(r'[\ud800-\udfff]', '', text)
-    # Дополнительная страховка: перекодируем с заменой
     return text.encode('utf-8', errors='replace').decode('utf-8')
 
 app = FastAPI(title="Quality Monitor Pro")
@@ -30,7 +26,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # ------------------------------------------------------------
-# Диагностический middleware (показывает ошибку в ответе)
+# Диагностический middleware
 # ------------------------------------------------------------
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
@@ -198,6 +194,7 @@ def init_db():
             resolved_dt = datetime.fromisoformat(resolved_at)
             resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
             c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
+        # Активные заявки
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
                     VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
@@ -656,9 +653,6 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
-# ------------------------------------------------------------
-# HTML страницы (очищаются принудительно)
-# ------------------------------------------------------------
 @app.get("/privacy")
 def privacy_policy():
     html = """<!DOCTYPE html>
@@ -679,7 +673,7 @@ def privacy_policy():
     return HTMLResponse(clean_text(html))
 
 # ------------------------------------------------------------
-# Главная страница (интерфейс) – полный HTML
+# Главная страница (полный интерфейс с исправленными цветами метрик)
 # ------------------------------------------------------------
 @app.get("/")
 def index():
@@ -735,14 +729,30 @@ def index():
         body.dark .article-card{background:#0f172a;border:1px solid #334155;}
         .article-title{font-size:1.25rem;font-weight:700;margin-bottom:0.5rem;}
         .article-content{font-size:1rem;line-height:1.6;}
-        body.light .bg-gray-50{background:#f8fafc;}
-        body.dark .bg-gray-50{background:#0f172a;}
-        body.light .bg-gray-100{background:#f1f5f9;}
-        body.dark .bg-gray-100{background:#1e293b;}
+        
+        /* Ключевые стили для контрастных метрик аналитики */
+        .metric-card {
+            border-radius: 0.75rem;
+            padding: 1rem;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        body.light .metric-card {
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+        body.dark .metric-card {
+            background: #1e293b;
+            color: #e2e8f0;
+        }
+        .chart-container { background: var(--card-bg-light); border-radius: 0.75rem; padding: 1rem; }
+        body.dark .chart-container { background: var(--card-bg-dark); }
         table{width:100%;border-collapse:collapse;}
         th,td{padding:0.75rem;text-align:left;border-bottom:1px solid;}
-        body.light th,body.light td{border-color:#e2e8f0;}
-        body.dark th,body.dark td{border-color:#334155;}
+        body.light th,body.light td{border-color:#e2e8f0;color:#1e293b;}
+        body.dark th,body.dark td{border-color:#334155;color:#e2e8f0;}
+        body.light .bg-gray-100 { background: #f1f5f9; color: #1e293b; }
+        body.dark .bg-gray-100 { background: #1e293b; color: #e2e8f0; }
     </style>
 </head>
 <body class="light">
@@ -827,22 +837,21 @@ def index():
         for(let t of data.tickets){
             let actionBtn='';
             if(t.status==='resolved'&&!t.satisfaction)actionBtn=`<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html+=`<tr><td>${t.id}</td><td>${escapeHtml(t.title)}</td><td><span class="status-badge status-${t.status}">${t.status}</span></td><td>${t.priority}</td><td>${new Date(t.created_at).toLocaleString()}</td><td>${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td>${escapeHtml(t.review||'—')}</td><td><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
+            html+=`<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${escapeHtml(t.review||'—')}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
         }
         html+='</tbody>}</div>';
         container.innerHTML=html;
-        window.viewTicket=async(id)=>{let ticketsData=await api('/api/tickets');let ticket=ticketsData.tickets.find(t=>t.id===id);if(!ticket)return;let comments=await api(`/api/tickets/${id}/comments`);let modalHtml=`<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2>Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c=>`<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" placeholder="Напишите комментарий..."></textarea><div><button class="bg-gray-500" onclick="closeModal()">Закрыть</button><button class="bg-blue-600" onclick="addComment(${id})">Отправить</button></div></div></div>`;document.body.insertAdjacentHTML('beforeend',modalHtml);window.closeModal=()=>document.getElementById('ticketModal')?.remove();window.addComment=async(id)=>{let txt=document.getElementById('newComment')?.value.trim();if(!txt){notyf.error('Введите текст');return;}let form=new URLSearchParams({comment:txt});await api(`/api/tickets/${id}/comments`,'POST',form);notyf.success('Комментарий отправлен');closeModal();renderUI();};};
-        window.openDetailedReview=async(id)=>{let modal=document.createElement('div');modal.className='fixed inset-0 bg-black/70 flex items-center justify-center z-50';modal.innerHTML=`<div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"><h3>Оцените качество</h3><div><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3"></textarea></div><div><button class="bg-gray-500" onclick="this.closest('.fixed').remove()">Отмена</button><button class="bg-green-600" onclick="submitReview(${id})">Отправить</button></div></div></div>`;document.body.appendChild(modal);modal.querySelectorAll('.stars').forEach(group=>{let crit=group.dataset.crit;group.querySelectorAll('.star').forEach(star=>{star.onclick=()=>{group.querySelectorAll('.star').forEach(s=>s.style.color='');star.style.color='#facc15';document.getElementById(`${crit}Val`).value=star.dataset.val;};});});window.submitReview=async(id)=>{let overall=document.getElementById('overallVal')?.value,speed=document.getElementById('speedVal')?.value,prof=document.getElementById('profVal')?.value,politeness=document.getElementById('politenessVal')?.value,comment=document.getElementById('reviewComment')?.value||'';if(!overall||!speed||!prof||!politeness){notyf.error('Заполните все оценки');return;}let form=new URLSearchParams({overall,speed,professionalism:prof,politeness,comment});await api(`/api/tickets/${id}/detailed_review`,'POST',form);notyf.success('Спасибо за отзыв!');modal.remove();renderUI();};};
+        window.viewTicket=async(id)=>{let ticketsData=await api('/api/tickets');let ticket=ticketsData.tickets.find(t=>t.id===id);if(!ticket)return;let comments=await api(`/api/tickets/${id}/comments`);let modalHtml=`<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c=>`<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea><div class="flex justify-end gap-2"><button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button><button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button></div></div></div>`;document.body.insertAdjacentHTML('beforeend',modalHtml);window.closeModal=()=>document.getElementById('ticketModal')?.remove();window.addComment=async(id)=>{let txt=document.getElementById('newComment')?.value.trim();if(!txt){notyf.error('Введите текст');return;}let form=new URLSearchParams({comment:txt});await api(`/api/tickets/${id}/comments`,'POST',form);notyf.success('Комментарий отправлен');closeModal();renderUI();};};
+        window.openDetailedReview=async(id)=>{let modal=document.createElement('div');modal.className='fixed inset-0 bg-black/70 flex items-center justify-center z-50';modal.innerHTML=`<div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"><h3 class="text-xl font-bold mb-4">Оцените качество</h3><div class="space-y-4"><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div><div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded" onclick="this.closest('.fixed').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded" onclick="submitReview(${id})">Отправить</button></div></div></div>`;document.body.appendChild(modal);modal.querySelectorAll('.stars').forEach(group=>{let crit=group.dataset.crit;group.querySelectorAll('.star').forEach(star=>{star.onclick=()=>{group.querySelectorAll('.star').forEach(s=>s.style.color='');star.style.color='#facc15';document.getElementById(`${crit}Val`).value=star.dataset.val;};});});window.submitReview=async(id)=>{let overall=document.getElementById('overallVal')?.value,speed=document.getElementById('speedVal')?.value,prof=document.getElementById('profVal')?.value,politeness=document.getElementById('politenessVal')?.value,comment=document.getElementById('reviewComment')?.value||'';if(!overall||!speed||!prof||!politeness){notyf.error('Заполните все оценки');return;}let form=new URLSearchParams({overall,speed,professionalism:prof,politeness,comment});await api(`/api/tickets/${id}/detailed_review`,'POST',form);notyf.success('Спасибо за отзыв!');modal.remove();renderUI();};};
     }
     function renderNewTicket(container){
-        container.innerHTML=`<div class="card"><h3>Новая заявка</h3><form id="newForm"><div><label>Название</label><input id="title" required></div><div><label>Описание</label><textarea id="desc" rows="3"></textarea></div><div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div><div><label>Категория</label><select id="category"></select></div><div><input type="checkbox" id="privacyConsent" required><label>Я согласен с <a href="/privacy" target="_blank">политикой</a></label></div><button type="submit" class="btn-primary mt-2">Создать</button></form></div>`;
+        container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3><form id="newForm" class="space-y-4"><div><label>Название</label><input id="title" required></div><div><label>Описание</label><textarea id="desc" rows="3"></textarea></div><div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div><div><label>Категория</label><select id="category"></select></div><div class="flex items-center gap-2"><input type="checkbox" id="privacyConsent" required><label class="text-sm">Я согласен с <a href="/privacy" target="_blank" class="text-blue-600">политикой</a></label></div><button type="submit" class="btn-primary mt-2">Создать</button></form></div>`;
         fetch('/api/categories').then(r=>r.json()).then(cats=>{let sel=document.getElementById('category');cats.forEach(c=>{let opt=document.createElement('option');opt.value=c.name;opt.innerText=c.name;sel.appendChild(opt);});});
         document.getElementById('newForm').onsubmit=async(e)=>{e.preventDefault();let privacy=document.getElementById('privacyConsent').checked;if(!privacy){notyf.error('Необходимо согласие');return;}let body=new URLSearchParams({title:document.getElementById('title').value,description:document.getElementById('desc').value,priority:document.getElementById('priority').value,category:document.getElementById('category').value,privacy_accepted:privacy});await api('/api/tickets','POST',body);notyf.success('Заявка создана');renderUI();};
     }
     async function renderKnowledge(container){
         let articles=await api('/api/knowledge');
-        let wrapper=document.createElement('div');wrapper.className='card';wrapper.innerHTML=`<h3 class="knowledge-title">📚 База знаний</h3><input type="text" id="kbSearchInput" class="knowledge-search w-full" placeholder="Поиск..."><div id="articlesList"></div>`;
-        container.appendChild(wrapper);
+        let wrapper=document.createElement('div');wrapper.className='card';wrapper.innerHTML=`<h3 class="knowledge-title">📚 База знаний</h3><input type="text" id="kbSearchInput" class="knowledge-search w-full" placeholder="Поиск..."><div id="articlesList"></div>`;container.appendChild(wrapper);
         let searchInput=wrapper.querySelector('#kbSearchInput'),articlesDiv=wrapper.querySelector('#articlesList');
         function render(a){if(a.length===0){articlesDiv.innerHTML='<div class="text-center text-gray-500 py-4">Статей не найдено</div>';return;}articlesDiv.innerHTML=a.map(art=>`<div class="article-card"><div class="article-title">${escapeHtml(art.title)}</div><div class="article-content">${escapeHtml(art.content)}</div></div>`).join('');}
         render(articles);
@@ -853,10 +862,10 @@ def index():
         let html='<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets){
             let actions='';
-            if(t.status==='new')actions=`<button class="bg-yellow-500" onclick="assign(${t.id})">Принять</button>`;
-            else if(t.status==='in_progress')actions=`<button class="bg-green-600" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600" onclick="respond(${t.id})">Ответить</button>`;
-            else if(t.status==='resolved')actions=`<button class="bg-red-600" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html+=`<tr><td>${t.id}</td><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.description||'—')}</td><td><span class="status-badge status-${t.status}">${t.status}</span></td><td>${t.priority}</td><td>${new Date(t.created_at).toLocaleString()}</td><td><button class="bg-blue-600" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
+            if(t.status==='new')actions=`<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
+            else if(t.status==='in_progress')actions=`<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
+            else if(t.status==='resolved')actions=`<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
+            html+=`<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Описание">${escapeHtml(t.description||'—')}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
         }
         html+='</tbody>}</div>';
         container.innerHTML=html;
@@ -864,33 +873,33 @@ def index():
         window.resolve=async(id)=>{let rev=prompt("Комментарий к решению:");if(rev!==null){await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT');renderUI();}};
         window.closeTicket=async(id)=>{await api(`/api/tickets/${id}?status=closed`,'PUT');renderUI();};
         window.respond=async(id)=>{let msg=prompt("Ответ клиенту:");if(msg){await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`,'PUT');renderUI();}};
-        window.viewTicket=async(id)=>{let ticketsData=await api('/api/tickets');let ticket=ticketsData.tickets.find(t=>t.id===id);if(!ticket)return;let comments=await api(`/api/tickets/${id}/comments`);let modalHtml=`<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2>Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c=>`<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" placeholder="Напишите комментарий..."></textarea><div><button class="bg-gray-500" onclick="closeModal()">Закрыть</button><button class="bg-blue-600" onclick="addComment(${id})">Отправить</button></div></div></div>`;document.body.insertAdjacentHTML('beforeend',modalHtml);window.closeModal=()=>document.getElementById('ticketModal')?.remove();window.addComment=async(id)=>{let txt=document.getElementById('newComment')?.value.trim();if(!txt){notyf.error('Введите текст');return;}let form=new URLSearchParams({comment:txt});await api(`/api/tickets/${id}/comments`,'POST',form);notyf.success('Комментарий отправлен');closeModal();renderUI();};};
+        window.viewTicket=async(id)=>{let ticketsData=await api('/api/tickets');let ticket=ticketsData.tickets.find(t=>t.id===id);if(!ticket)return;let comments=await api(`/api/tickets/${id}/comments`);let modalHtml=`<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c=>`<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea><div class="flex justify-end gap-2"><button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button><button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button></div></div></div>`;document.body.insertAdjacentHTML('beforeend',modalHtml);window.closeModal=()=>document.getElementById('ticketModal')?.remove();window.addComment=async(id)=>{let txt=document.getElementById('newComment')?.value.trim();if(!txt){notyf.error('Введите текст');return;}let form=new URLSearchParams({comment:txt});await api(`/api/tickets/${id}/comments`,'POST',form);notyf.success('Комментарий отправлен');closeModal();renderUI();};};
     }
-    function renderExport(container){container.innerHTML=`<div class="card"><h3>Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`;}
+    function renderExport(container){container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`;}
     async function renderAdminUsers(container){
         let users=await api('/api/users');
-        let html='<div class="card overflow-x-auto"><h3>Управление пользователями</h3><table><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
+        let html='<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users){
-            html+=`<tr><td>${u.id}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.full_name)}</td><td>${u.role}</td><td><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td><button class="bg-blue-600" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
+            html+=`<tr><td data-label="ID">${u.id}</td><td data-label="Email">${escapeHtml(u.email)}</td><td data-label="ФИО">${escapeHtml(u.full_name)}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
-        html+='</tbody></table></div>';
+        html+='</tbody>}</div>';
         container.innerHTML=html;
         window.changeRole=async(id)=>{let newRole=document.getElementById(`role-${id}`).value;await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT');notyf.success('Роль изменена');renderAdminUsers(container);};
         window.delUser=async(id)=>{if(confirm('Удалить пользователя?')){await api(`/api/users/${id}`,'DELETE');notyf.success('Пользователь удалён');renderAdminUsers(container);}};
     }
     async function renderAdminSLA(container){
         let sla=await api('/api/admin/sla');
-        container.innerHTML=`<div class="card"><h3>Настройки SLA</h3><div><label>Время ответа High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}"></div><div><label>Время ответа Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}"></div><button class="btn-primary" id="saveSla">Сохранить</button></div>`;
+        container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">Настройки SLA</h3><div><label>Время ответа High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}"></div><div><label>Время ответа Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}"></div><button class="btn-primary" id="saveSla">Сохранить</button></div>`;
         document.getElementById('saveSla').onclick=async()=>{await api(`/api/admin/sla?response_high_hours=${document.getElementById('high').value}&response_medium_hours=${document.getElementById('medium').value}`,'PUT');notyf.success('Настройки сохранены');};
     }
     async function renderAdminLogs(container){
         let logs=await api('/api/admin/logs');
-        let html=`<div class="card"><h3>Логи</h3><table><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>${logs.map(l=>`<tr><td>${new Date(l.time).toLocaleString()}</td><td>${l.user_id}</td><td>${escapeHtml(l.action)}</td><td>${escapeHtml(l.details||'')}</td></tr>`).join('')}</tbody></table></div>`;
+        let html=`<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>${logs.map(l=>`<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${escapeHtml(l.action)}</td><td data-label="Детали">${escapeHtml(l.details||'')}</td></tr>`).join('')}</tbody>}</div>`;
         container.innerHTML=html;
     }
     async function renderDashboard(container){
         let m=await api('/api/dashboard/metrics');
-        container.innerHTML=`<div class="card"><h3>📊 Дашборд качества</h3><div class="grid grid-cols-5 gap-4 mb-8"><div class="bg-blue-500 text-white p-4 rounded-xl"><div>Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div><div class="bg-green-500 text-white p-4 rounded-xl"><div>Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div><div class="bg-purple-500 text-white p-4 rounded-xl"><div>Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div><div class="bg-orange-500 text-white p-4 rounded-xl"><div>Соблюдение SLA</div><div class="text-3xl font-bold">${m.sla_compliance}%</div></div><div class="bg-cyan-500 text-white p-4 rounded-xl"><div>Ср. время решения</div><div class="text-3xl font-bold">${m.avg_resolution_minutes} мин</div></div></div><div class="grid grid-cols-2 gap-6"><div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="statusChartDash" height="200"></canvas></div><div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="trendChartDash" height="200"></canvas></div></div><div class="text-xs text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div></div>`;
+        container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">📊 Дашборд качества</h3><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8"><div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl"><div class="text-sm">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div><div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl"><div class="text-sm">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div><div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl"><div class="text-sm">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div><div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-4 rounded-xl"><div class="text-sm">Соблюдение SLA</div><div class="text-3xl font-bold">${m.sla_compliance}%</div></div><div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl"><div class="text-sm">Ср. время решения</div><div class="text-3xl font-bold">${m.avg_resolution_minutes} <span class="text-lg">мин</span></div></div></div><div class="grid lg:grid-cols-2 gap-6"><div class="bg-gray-50 p-4 rounded-xl"><canvas id="statusChartDash" height="200"></canvas></div><div class="bg-gray-50 p-4 rounded-xl"><canvas id="trendChartDash" height="200"></canvas></div></div><div class="text-xs text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div></div>`;
         const colors={new:'#facc15',in_progress:'#3b82f6',resolved:'#22c55e',closed:'#64748b'};
         let statusLabels=Object.keys(m.status_counts),statusData=Object.values(m.status_counts);
         let statusConfig={labels:statusLabels.map(s=>({new:'Новые',in_progress:'В работе',resolved:'Решённые',closed:'Закрытые'}[s]||s)),datasets:[{data:statusData,backgroundColor:statusLabels.map(s=>colors[s]||'#94a3b8')}]};
@@ -901,7 +910,7 @@ def index():
         window.trendChart=new Chart(document.getElementById('trendChartDash'),{type:'line',data:trendConfig,options:{responsive:true}});
     }
     async function renderAdvancedDashboard(container){
-        container.innerHTML=`<div class="card"><h3>Аналитика оценок</h3><div class="flex gap-4 mb-6"><div><label>Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div><div><label>Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div><div><label>Категория</label><select id="categoryFilter"><option value="">Все</option></select></div><button class="btn-primary" id="applyFilters">Применить</button></div><div class="grid grid-cols-4 gap-4 mb-6"><div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div><div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div><div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div><div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div></div><div class="mb-6"><canvas id="operatorChart" height="300"></canvas></div><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div></div>`;
+        container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3><div class="flex flex-wrap gap-4 mb-6"><div><label class="block text-sm">Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div><div><label class="block text-sm">Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div><div><label class="block text-sm">Категория</label><select id="categoryFilter"><option value="">Все</option></select></div><button class="btn-primary" id="applyFilters">Применить</button></div><div class="grid md:grid-cols-4 gap-4 mb-6"><div class="metric-card"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div></div><div class="mb-6 chart-container"><canvas id="operatorChart" height="300"></canvas></div><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody>}</div></div>`;
         let users=await api('/api/users'),cats=await api('/api/categories');
         let opSelect=document.getElementById('operatorFilter');opSelect.innerHTML='<option value="">Все</option>'+users.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}">${escapeHtml(u.full_name)}</option>`).join('');
         let catSelect=document.getElementById('categoryFilter');catSelect.innerHTML='<option value="">Все</option>'+cats.map(c=>`<option value="${c.name}">${escapeHtml(c.name)}</option>`).join('');
@@ -914,7 +923,7 @@ def index():
             let tableHtml='',opColors=['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
             for(let op of data.operator_stats){
                 let badge=op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
-                tableHtml+=`<tr><td class="font-medium">${escapeHtml(op.name)}</td><td class="text-center">${op.count}</td><td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span></td><td class="text-center">${op.speed_avg}</td><td class="text-center">${op.prof_avg}</td><td class="text-center">${op.politeness_avg}</td></tr>`;
+                tableHtml+=`<tr><td class="font-medium">${escapeHtml(op.name)}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</tr>`;
             }
             document.getElementById('operatorTable').innerHTML=tableHtml;
             let ctx=document.getElementById('operatorChart').getContext('2d');
@@ -930,8 +939,7 @@ def index():
 </script>
 </body>
 </html>"""
-    safe_html = clean_text(html_content)
-    return HTMLResponse(safe_html)
+    return HTMLResponse(clean_text(html_content))
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
