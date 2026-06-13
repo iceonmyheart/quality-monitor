@@ -13,7 +13,7 @@ import re
 import traceback
 
 # ------------------------------------------------------------
-# Очистка суррогатных символов
+# Очистка суррогатов
 # ------------------------------------------------------------
 def clean_text(text: str) -> str:
     if not text:
@@ -41,7 +41,7 @@ else:
 print(f"📁 База данных: {DB_PATH}", file=sys.stderr)
 
 # ------------------------------------------------------------
-# Инициализация БД
+# Инициализация БД (полностью идентична предыдущей версии)
 # ------------------------------------------------------------
 def init_db():
     try:
@@ -186,7 +186,6 @@ def init_db():
             resolved_dt = datetime.fromisoformat(resolved_at)
             resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
             c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
-        # Активные заявки
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
                     VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
@@ -199,7 +198,7 @@ init_db()
 sessions = {}
 
 # ------------------------------------------------------------
-# API (все эндпоинты)
+# API (все эндпоинты такие же, как в предыдущей версии, с clean_text)
 # ------------------------------------------------------------
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...), privacy_accepted: bool = Form(...)):
@@ -661,7 +660,7 @@ def privacy_policy():
     return HTMLResponse(clean_text(html))
 
 # ------------------------------------------------------------
-# Главная страница с hash-навигацией и полными рендерами
+# Главная страница с классическим переключением вкладок (без hash)
 # ------------------------------------------------------------
 @app.get("/")
 def index():
@@ -669,74 +668,77 @@ def index():
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Quality Monitor Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
     <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
     <style>
-        *{transition:all 0.2s ease;}
-        body.light{background:#f1f5f9;color:#1e293b;}
-        body.dark{background:#0f172a;color:#e2e8f0;}
-        .card{border-radius:1rem;padding:1.5rem;margin-bottom:1.5rem;}
-        body.light .card{background:#ffffff;border:1px solid #e2e8f0;}
-        body.dark .card{background:#1e293b;border:1px solid #334155;}
-        .btn-primary{background:#15803d;color:white;padding:0.5rem 1rem;border-radius:0.5rem;cursor:pointer;border:none;}
-        .btn-primary:hover{background:#166534;transform:scale(1.02);}
-        .tab-btn{padding:0.5rem 1rem;border-radius:2rem;cursor:pointer;}
-        .tab-btn:hover{background:#15803d20;}
-        body.light .tab-btn.active{background:#15803d;color:white;}
-        body.dark .tab-btn.active{background:#15803d;color:white;}
-        .status-badge{display:inline-block;padding:0.2rem 0.7rem;border-radius:2rem;font-size:0.7rem;font-weight:600;}
-        body.light .status-new{background:#fef3c7;color:#b45309;}
-        body.dark .status-new{background:#713f12;color:#fde68a;}
-        body.light .status-in_progress{background:#dbeafe;color:#1d4ed8;}
-        body.dark .status-in_progress{background:#1e3a8a;color:#93c5fd;}
-        body.light .status-resolved{background:#dcfce7;color:#15803d;}
-        body.dark .status-resolved{background:#14532d;color:#86efac;}
-        body.light .status-closed{background:#f1f5f9;color:#475569;}
-        body.dark .status-closed{background:#334155;color:#cbd5e1;}
-        body.light input,body.light select,body.light textarea{background:#f8fafc;border:1px solid #cbd5e1;color:#1e293b;}
-        body.dark input,body.dark select,body.dark textarea{background:#0f172a;border:1px solid #334155;color:#e2e8f0;}
-        input,select,textarea{border-radius:0.5rem;padding:0.5rem;width:100%;outline:none;}
-        input:focus,select:focus,textarea:focus{border-color:#15803d;box-shadow:0 0 0 2px #15803d20;}
-        .ticket-modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:1000;}
-        body.light .ticket-modal-content{background:white;color:#1e293b;}
-        body.dark .ticket-modal-content{background:#1e293b;color:#e2e8f0;}
-        .ticket-modal-content{border-radius:1.5rem;padding:1.5rem;width:90%;max-width:700px;max-height:90vh;overflow-y:auto;}
-        .comment-item{border-radius:0.75rem;padding:0.75rem;margin-bottom:0.5rem;}
-        body.light .comment-item{background:#f1f5f9;}
-        body.dark .comment-item{background:#334155;}
-        .knowledge-title{font-size:1.75rem;font-weight:700;margin-bottom:1.25rem;}
-        .knowledge-search{font-size:1rem;padding:0.75rem 1rem;border-radius:0.75rem;margin-bottom:1.5rem;}
-        body.light .knowledge-search{background:#ffffff;border:1px solid #cbd5e1;color:#1e293b;}
-        body.dark .knowledge-search{background:#1e293b;border:1px solid #475569;color:#e2e8f0;}
-        .article-card{border-radius:1rem;padding:1.25rem;margin-bottom:1rem;}
-        body.light .article-card{background:#f8fafc;border:1px solid #e2e8f0;}
-        body.dark .article-card{background:#0f172a;border:1px solid #334155;}
-        .article-title{font-size:1.25rem;font-weight:700;margin-bottom:0.5rem;}
-        .article-content{font-size:1rem;line-height:1.6;}
-        .metric-card{border-radius:0.75rem;padding:1rem;text-align:center;}
-        body.light .metric-card{background:#f1f5f9;color:#1e293b;}
-        body.dark .metric-card{background:#1e293b;color:#e2e8f0;}
-        .chart-container{border-radius:0.75rem;padding:1rem;}
-        body.light .chart-container{background:#f8fafc;}
-        body.dark .chart-container{background:#0f172a;}
-        table{width:100%;border-collapse:collapse;}
-        th,td{padding:0.75rem;text-align:left;border-bottom:1px solid;}
-        body.light th,body.light td{border-color:#e2e8f0;color:#1e293b;}
-        body.dark th,body.dark td{border-color:#334155;color:#e2e8f0;}
+        * { transition: all 0.2s ease; }
+        body.light { background: #f1f5f9; color: #1e293b; }
+        body.dark { background: #0f172a; color: #e2e8f0; }
+        .card { border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        body.light .card { background: #ffffff; border: 1px solid #e2e8f0; }
+        body.dark .card { background: #1e293b; border: 1px solid #334155; }
+        .btn-primary { background: #15803d; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; border: none; }
+        .btn-primary:hover { background: #166534; transform: scale(1.02); }
+        .tab-btn { padding: 0.5rem 1rem; border-radius: 2rem; cursor: pointer; }
+        .tab-btn:hover { background: #15803d20; transform: translateY(-1px); }
+        body.light .tab-btn.active { background: #15803d; color: white; }
+        body.dark .tab-btn.active { background: #15803d; color: white; }
+        .status-badge { display: inline-block; padding: 0.2rem 0.7rem; border-radius: 2rem; font-size: 0.7rem; font-weight: 600; }
+        body.light .status-new { background: #fef3c7; color: #b45309; }
+        body.dark .status-new { background: #713f12; color: #fde68a; }
+        body.light .status-in_progress { background: #dbeafe; color: #1d4ed8; }
+        body.dark .status-in_progress { background: #1e3a8a; color: #93c5fd; }
+        body.light .status-resolved { background: #dcfce7; color: #15803d; }
+        body.dark .status-resolved { background: #14532d; color: #86efac; }
+        body.light .status-closed { background: #f1f5f9; color: #475569; }
+        body.dark .status-closed { background: #334155; color: #cbd5e1; }
+        input, select, textarea { border-radius: 0.5rem; padding: 0.5rem; width: 100%; outline: none; }
+        body.light input, body.light select, body.light textarea { background: #f8fafc; border: 1px solid #cbd5e1; color: #1e293b; }
+        body.dark input, body.dark select, body.dark textarea { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; }
+        input:focus, select:focus, textarea:focus { border-color: #15803d; box-shadow: 0 0 0 2px #15803d20; }
+        .tab-pane { display: none; animation: fadeIn 0.3s ease-out; }
+        .tab-pane.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .ticket-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        body.light .ticket-modal-content { background: white; color: #1e293b; }
+        body.dark .ticket-modal-content { background: #1e293b; color: #e2e8f0; }
+        .ticket-modal-content { border-radius: 1.5rem; padding: 1.5rem; width: 90%; max-width: 700px; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .comment-item { border-radius: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem; }
+        body.light .comment-item { background: #f1f5f9; }
+        body.dark .comment-item { background: #334155; }
+        .knowledge-title { font-size: 1.75rem; font-weight: 700; margin-bottom: 1.25rem; }
+        .knowledge-search { font-size: 1rem; padding: 0.75rem 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem; }
+        body.light .knowledge-search { background: #ffffff; border: 1px solid #cbd5e1; color: #1e293b; }
+        body.dark .knowledge-search { background: #1e293b; border: 1px solid #475569; color: #e2e8f0; }
+        .article-card { border-radius: 1rem; padding: 1.25rem; margin-bottom: 1rem; }
+        body.light .article-card { background: #f8fafc; border: 1px solid #e2e8f0; }
+        body.dark .article-card { background: #0f172a; border: 1px solid #334155; }
+        .article-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .article-content { font-size: 1rem; line-height: 1.6; }
+        .metric-card { border-radius: 0.75rem; padding: 1rem; text-align: center; }
+        body.light .metric-card { background: #f1f5f9; color: #1e293b; }
+        body.dark .metric-card { background: #1e293b; color: #e2e8f0; }
+        .chart-container { border-radius: 0.75rem; padding: 1rem; }
+        body.light .chart-container { background: #f8fafc; }
+        body.dark .chart-container { background: #0f172a; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid; }
+        body.light th, body.light td { border-color: #e2e8f0; color: #1e293b; }
+        body.dark th, body.dark td { border-color: #334155; color: #e2e8f0; }
     </style>
 </head>
 <body class="light">
 <div class="max-w-7xl mx-auto px-4 py-6 container">
     <div class="flex justify-between items-center mb-8 p-4 bg-white dark:bg-gray-800 shadow rounded-2xl border">
-        <div><h1 class="text-2xl font-bold text-gray-800 dark:text-white">Quality Monitor Pro</h1><p class="text-xs text-gray-500 dark:text-gray-400">Мониторинг качества услуг и технической поддержки</p></div>
+        <div class="flex items-center gap-3"><div class="text-3xl">📊</div><div><h1 class="text-2xl font-bold text-gray-800 dark:text-white">Quality Monitor Pro</h1><p class="text-xs text-gray-500 dark:text-gray-400">Мониторинг качества услуг и технической поддержки</p></div></div>
         <div class="flex gap-4 items-center">
             <button id="themeToggle" class="text-2xl hover:scale-110">🌙</button>
             <button id="qrButton" class="text-2xl hover:scale-110">📱</button>
-            <a href="/privacy" target="_blank" class="text-xs text-gray-500 dark:text-gray-400 hover:underline">Политика</a>
+            <a href="/privacy" target="_blank" class="text-xs text-gray-500 dark:text-gray-400 hover:underline">Политика конфиденциальности</a>
             <div id="userPanel"></div>
         </div>
     </div>
@@ -744,206 +746,255 @@ def index():
 </div>
 <div id="qrModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
     <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 text-center max-w-sm">
-        <h3 class="text-lg font-bold mb-2">QR-код ссылки</h3>
-        <img id="qrImage" src="" class="mx-auto my-4 w-48"><p class="text-sm break-all" id="qrUrl"></p>
-        <button class="mt-4 bg-gray-500 text-white px-4 py-2 rounded" onclick="document.getElementById('qrModal').classList.add('hidden')">Закрыть</button>
+        <h3 class="text-lg font-bold mb-2">QR-код ссылки на сайт</h3>
+        <img id="qrImage" src="" alt="QR Code" class="mx-auto my-4 w-48"><p class="text-sm break-all" id="qrUrl"></p>
+        <button class="mt-4 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600" onclick="document.getElementById('qrModal').classList.add('hidden')">Закрыть</button>
     </div>
 </div>
 <script>
-    function escapeHtml(s){if(!s)return'';return s.replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));}
-    let currentUser=null, theme=localStorage.getItem('theme')||'light';
-    let currentTabs=[];
-    let tabIdToIndex={};
-    let isUpdatingHash=false;
-    const notyf=new Notyf({duration:3000,position:{x:'right',y:'top'}});
-    function applyTheme(){
-        if(theme==='dark'){document.body.classList.remove('light');document.body.classList.add('dark');document.getElementById('themeToggle').innerText='☀️';}
-        else{document.body.classList.remove('dark');document.body.classList.add('light');document.getElementById('themeToggle').innerText='🌙';}
-        localStorage.setItem('theme',theme);
-        if(window.statusChart){window.statusChart.destroy();window.trendChart.destroy();window.opChart?.destroy();}
-        const activePane=document.querySelector('.tab-pane.active');
-        if(activePane&&currentTabs){const idx=activePane.id.split('-')[1];if(currentTabs[idx])currentTabs[idx].render(activePane);}
+    function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+    let currentUser = null;
+    let theme = localStorage.getItem('theme') || 'light';
+    const notyf = new Notyf({ duration:3000, position:{x:'right',y:'top'} });
+    function applyTheme() {
+        if(theme === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); document.getElementById('themeToggle').innerText = '☀️'; }
+        else { document.body.classList.remove('dark'); document.body.classList.add('light'); document.getElementById('themeToggle').innerText = '🌙'; }
+        localStorage.setItem('theme', theme);
+        // Перерисовываем графики
+        if(window.statusChart) { window.statusChart.destroy(); window.trendChart.destroy(); window.opChart?.destroy(); }
+        const activePane = document.querySelector('.tab-pane.active');
+        if(activePane && window.currentTabs) {
+            const idx = activePane.id.split('-')[1];
+            if(window.currentTabs[idx]) window.currentTabs[idx].render(activePane);
+        }
     }
-    document.getElementById('themeToggle').onclick=()=>{theme=theme==='dark'?'light':'dark';applyTheme();};
-    document.getElementById('qrButton').onclick=()=>{let url=window.location.href.split('#')[0];document.getElementById('qrImage').src=`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;document.getElementById('qrUrl').innerText=url;document.getElementById('qrModal').classList.remove('hidden');};
-    async function api(url,method='GET',body=null){
-        let opts={method};
-        if(body){opts.body=body;opts.headers={'Content-Type':'application/x-www-form-urlencoded'};}
-        let res=await fetch(url,opts);
-        if(res.status===401){
-            document.cookie.split(";").forEach(c=>document.cookie=c.replace(/^ +/,"").replace(/=.*/,"=;expires="+new Date().toUTCString()+";path=/"));
-            if(currentUser){currentUser=null;renderLogin();}
+    document.getElementById('themeToggle').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; applyTheme(); };
+    document.getElementById('qrButton').addEventListener('click', function() {
+        let url = window.location.href;
+        let qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+        document.getElementById('qrImage').src = qrSrc;
+        document.getElementById('qrUrl').innerText = url;
+        document.getElementById('qrModal').classList.remove('hidden');
+    });
+    async function api(url, method='GET', body=null) {
+        let opts = { method };
+        if(body) { opts.body = body; opts.headers = {'Content-Type':'application/x-www-form-urlencoded'}; }
+        let res = await fetch(url, opts);
+        if(res.status === 401) {
+            document.cookie.split(";").forEach(c => { document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); });
+            if(currentUser) { currentUser = null; renderLogin(); }
             throw new Error('Unauthorized');
         }
-        if(!res.ok)throw new Error(await res.text());
+        if(!res.ok) throw new Error(await res.text());
         return res.json();
     }
-    async function login(email,password){let form=new URLSearchParams({email,password});await api('/api/login','POST',form);await loadUser();}
-    async function loadUser(){
-        try{
-            currentUser=await api('/api/me');
-            document.getElementById('userPanel').innerHTML=`<span class="font-medium">${escapeHtml(currentUser.name)}</span><span class="bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-sm ml-2">${escapeHtml(currentUser.role)}</span><button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm ml-2" onclick="logout()">Выйти</button>`;
+    async function login(email, password) { let form = new URLSearchParams({email,password}); await api('/api/login','POST',form); await loadUser(); }
+    async function loadUser() {
+        try {
+            currentUser = await api('/api/me');
+            document.getElementById('userPanel').innerHTML = `<span class="font-medium">${escapeHtml(currentUser.name)}</span><span class="bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-sm ml-2">${escapeHtml(currentUser.role)}</span><button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm ml-2 transition" onclick="logout()">Выйти</button>`;
             renderUI();
-        }catch(e){currentUser=null;renderLogin();}
+        } catch(e) { currentUser = null; renderLogin(); }
     }
-    async function logout(){try{await api('/api/logout','POST');}catch(e){}currentUser=null;renderLogin();}
-    function renderLogin(){
-        document.getElementById('app').innerHTML=`<div class="max-w-md mx-auto card"><h2 class="text-2xl font-bold mb-4">Вход</h2><form id="loginForm"><div><label>Email</label><input id="email" type="email" class="w-full"></div><div><label>Пароль</label><input id="password" type="password" class="w-full"></div><button type="submit" class="btn-primary w-full mt-2">Войти</button></form><hr class="my-6"><h3 class="text-xl font-semibold mb-4">Регистрация</h3><form id="registerForm"><div><label>Email</label><input id="regEmail" type="email"></div><div><label>ФИО</label><input id="regName"></div><div><label>Пароль</label><input id="regPassword" type="password"></div><div class="flex items-center gap-2"><input type="checkbox" id="regPrivacy" required><label>Я согласен с <a href="/privacy" target="_blank" class="text-blue-600">политикой</a></label></div><button type="submit" class="btn-primary w-full mt-2">Зарегистрироваться</button></form></div>`;
-        document.getElementById('loginForm').onsubmit=async(e)=>{e.preventDefault();try{await login(e.target.email.value,e.target.password.value);notyf.success('Вход выполнен');}catch(e){notyf.error('Ошибка входа');}};
-        document.getElementById('registerForm').onsubmit=async(e)=>{e.preventDefault();let privacy=document.getElementById('regPrivacy').checked;if(!privacy){notyf.error('Согласие обязательно');return;}let form=new URLSearchParams({email:e.target.regEmail.value,full_name:e.target.regName.value,password:e.target.regPassword.value,privacy_accepted:privacy});await fetch('/api/register',{method:'POST',body:form});notyf.success('Регистрация успешна, теперь войдите');};
+    async function logout() { try { await api('/api/logout','POST'); } catch(e) {} currentUser = null; renderLogin(); }
+    function renderLogin() {
+        document.getElementById('app').innerHTML = `
+            <div class="max-w-md mx-auto card">
+                <h2 class="text-2xl font-bold mb-4">Вход</h2>
+                <form id="loginForm" class="space-y-4">
+                    <div><label class="block text-sm font-medium">Email</label><input id="email" type="email" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Пароль</label><input id="password" type="password" class="w-full"></div>
+                    <button type="submit" class="btn-primary w-full">Войти</button>
+                </form>
+                <hr class="my-6">
+                <h3 class="text-xl font-semibold mb-4">Регистрация</h3>
+                <form id="registerForm" class="space-y-4">
+                    <div><label class="block text-sm font-medium">Email</label><input id="regEmail" type="email" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">ФИО</label><input id="regName" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Пароль</label><input id="regPassword" type="password" class="w-full"></div>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="regPrivacy" required>
+                        <label class="text-sm">Я согласен с <a href="/privacy" target="_blank" class="text-blue-600 hover:underline">политикой обработки персональных данных</a></label>
+                    </div>
+                    <button type="submit" class="btn-primary w-full">Зарегистрироваться</button>
+                </form>
+            </div>
+        `;
+        document.getElementById('loginForm').onsubmit = async (e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch(e) { notyf.error('Ошибка входа'); } };
+        document.getElementById('registerForm').onsubmit = async (e) => { e.preventDefault(); let privacy = document.getElementById('regPrivacy').checked; if(!privacy) { notyf.error('Необходимо согласие на обработку персональных данных'); return; } let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value, privacy_accepted:privacy }); await fetch('/api/register', { method:'POST', body:form }); notyf.success('Регистрация успешна, теперь войдите'); };
     }
-    async function renderUI(){
-        if(!currentUser)return;
-        let tabs=[];
-        if(currentUser.role==='client')tabs=[{id:'myTickets',label:'Мои заявки',render:renderClientTickets},{id:'newTicket',label:'Новая заявка',render:renderNewTicket},{id:'knowledge',label:'База знаний',render:renderKnowledge}];
-        else if(currentUser.role==='operator')tabs=[{id:'allTickets',label:'Все заявки',render:renderOperatorTickets},{id:'exportData',label:'Экспорт',render:renderExport}];
-        else if(currentUser.role==='admin')tabs=[{id:'usersManage',label:'Пользователи',render:renderAdminUsers},{id:'slaSettings',label:'Настройки SLA',render:renderAdminSLA},{id:'logs',label:'Логи',render:renderAdminLogs},{id:'knowledge',label:'База знаний',render:renderKnowledge},{id:'dashboard',label:'Дашборд',render:renderDashboard},{id:'advancedAnalytics',label:'Аналитика оценок',render:renderAdvancedDashboard},{id:'exportData',label:'Экспорт',render:renderExport}];
-        else if(currentUser.role==='quality')tabs=[{id:'dashboard',label:'Дашборд',render:renderDashboard},{id:'advancedAnalytics',label:'Аналитика оценок',render:renderAdvancedDashboard},{id:'knowledge',label:'База знаний',render:renderKnowledge},{id:'exportData',label:'Экспорт',render:renderExport}];
-        currentTabs=tabs;
-        tabIdToIndex={};tabs.forEach((t,i)=>tabIdToIndex[t.id]=i);
-        let tabsHtml=`<div class="flex gap-2 mb-4 border-b pb-2 flex-wrap">${tabs.map(t=>`<button class="tab-btn" data-tab-id="${t.id}">${escapeHtml(t.label)}</button>`).join('')}</div><div id="panes"></div>`;
-        document.getElementById('app').innerHTML=tabsHtml;
-        let panesDiv=document.getElementById('panes');
-        for(let i=0;i<tabs.length;i++){let pane=document.createElement('div');pane.className='tab-pane';pane.id=`pane-${i}`;panesDiv.appendChild(pane);}
-        async function switchToTabById(tabId){
-            let idx=tabIdToIndex[tabId];if(idx===undefined)return false;
-            document.querySelectorAll('.tab-btn').forEach(btn=>btn.classList.remove('active'));
-            let targetBtn=document.querySelector(`.tab-btn[data-tab-id="${tabId}"]`);if(targetBtn)targetBtn.classList.add('active');
-            document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
-            let activePane=document.getElementById(`pane-${idx}`);
-            if(activePane){activePane.classList.add('active');if(activePane.innerHTML==='')await tabs[idx].render(activePane);}
-            return true;
+    async function renderUI() {
+        if(!currentUser) return;
+        let tabs = [];
+        if(currentUser.role === 'client') tabs = [
+            { id: 'myTickets', label: 'Мои заявки', render: renderClientTickets },
+            { id: 'newTicket', label: 'Новая заявка', render: renderNewTicket },
+            { id: 'knowledge', label: 'База знаний', render: renderKnowledge }
+        ];
+        else if(currentUser.role === 'operator') tabs = [
+            { id: 'allTickets', label: 'Все заявки', render: renderOperatorTickets },
+            { id: 'exportData', label: 'Экспорт', render: renderExport }
+        ];
+        else if(currentUser.role === 'admin') tabs = [
+            { id: 'usersManage', label: 'Пользователи', render: renderAdminUsers },
+            { id: 'slaSettings', label: 'Настройки SLA', render: renderAdminSLA },
+            { id: 'logs', label: 'Логи', render: renderAdminLogs },
+            { id: 'knowledge', label: 'База знаний', render: renderKnowledge },
+            { id: 'dashboard', label: 'Дашборд', render: renderDashboard },
+            { id: 'advancedAnalytics', label: 'Аналитика оценок', render: renderAdvancedDashboard },
+            { id: 'exportData', label: 'Экспорт', render: renderExport }
+        ];
+        else if(currentUser.role === 'quality') tabs = [
+            { id: 'dashboard', label: 'Дашборд', render: renderDashboard },
+            { id: 'advancedAnalytics', label: 'Аналитика оценок', render: renderAdvancedDashboard },
+            { id: 'knowledge', label: 'База знаний', render: renderKnowledge },
+            { id: 'exportData', label: 'Экспорт', render: renderExport }
+        ];
+        let tabsHtml = `<div class="flex gap-2 mb-4 border-b pb-2 flex-wrap">${tabs.map((t,i)=>`<button class="tab-btn ${i===0?'active':''}" data-tab-index="${i}">${escapeHtml(t.label)}</button>`).join('')}</div><div id="panes"></div>`;
+        document.getElementById('app').innerHTML = tabsHtml;
+        let panesDiv = document.getElementById('panes');
+        for(let i=0; i<tabs.length; i++) {
+            let pane = document.createElement('div');
+            pane.className = `tab-pane ${i===0?'active':''}`;
+            pane.id = `pane-${i}`;
+            panesDiv.appendChild(pane);
         }
-        async function handleHashChange(){
-            if(isUpdatingHash)return;
-            let hash=window.location.hash.substring(1);
-            if(hash===''){hash=tabs[0].id;isUpdatingHash=true;window.location.hash=hash;isUpdatingHash=false;}
-            await switchToTabById(hash);
+        window.currentTabs = tabs;
+        async function loadPane(index) {
+            let pane = document.getElementById(`pane-${index}`);
+            if(!pane) return;
+            let tab = tabs[index];
+            if(!tab) return;
+            pane.innerHTML = '';
+            await tab.render(pane);
         }
-        document.querySelectorAll('.tab-btn').forEach(btn=>{btn.onclick=async(e)=>{let tabId=btn.getAttribute('data-tab-id');if(tabId&&window.location.hash!=='#'+tabId){isUpdatingHash=true;window.location.hash=tabId;isUpdatingHash=false;await switchToTabById(tabId);}};});
-        window.addEventListener('hashchange',handleHashChange);
-        await handleHashChange();
+        await loadPane(0);
+        document.querySelectorAll('.tab-btn').forEach((btn, idx) => {
+            btn.onclick = async () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                document.getElementById(`pane-${idx}`).classList.add('active');
+                await loadPane(idx);
+            };
+        });
     }
-    // ---------- Рендер для клиента ----------
-    async function renderClientTickets(container){
-        let data=await api('/api/tickets');
-        let html='<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Оценка</th><th>Ответ</th><th>Действие</th></tr></thead><tbody>';
-        for(let t of data.tickets){
-            let actionBtn='';
-            if(t.status==='resolved'&&!t.satisfaction)actionBtn=`<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html+=`<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${escapeHtml(t.review||'—')}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
+    // ========== Рендеры (все функции полностью идентичны предыдущей рабочей версии) ==========
+    async function renderClientTickets(container) {
+        let data = await api('/api/tickets');
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Оценка</th><th>Ответ</th><th>Действие</th></tr></thead><tbody>';
+        for(let t of data.tickets) {
+            let actionBtn = '';
+            if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="openDetailedReview(${t.id})">Оценить</button>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${escapeHtml(t.review||'—')}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
         }
-        html+='</tbody>}</div>';
-        container.innerHTML=html;
-        window.viewTicket=async(id)=>{
-            let ticketsData=await api('/api/tickets');let ticket=ticketsData.tickets.find(t=>t.id===id);if(!ticket)return;
-            let comments=await api(`/api/tickets/${id}/comments`);
-            let modalHtml=`<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c=>`<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea><div class="flex justify-end gap-2"><button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button><button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button></div></div></div>`;
-            document.body.insertAdjacentHTML('beforeend',modalHtml);
-            window.closeModal=()=>document.getElementById('ticketModal')?.remove();
-            window.addComment=async(id)=>{let txt=document.getElementById('newComment')?.value.trim();if(!txt){notyf.error('Введите текст');return;}let form=new URLSearchParams({comment:txt});await api(`/api/tickets/${id}/comments`,'POST',form);notyf.success('Комментарий отправлен');closeModal();renderUI();};
+        html += '</tbody>}</div>';
+        container.innerHTML = html;
+        window.viewTicket = async (id) => {
+            let ticketsData = await api('/api/tickets'); let ticket = ticketsData.tickets.find(t => t.id === id); if(!ticket) return;
+            let comments = await api(`/api/tickets/${id}/comments`);
+            let modalHtml = `<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c=>`<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea><div class="flex justify-end gap-2"><button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button><button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button></div></div></div>`;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            window.closeModal = () => document.getElementById('ticketModal')?.remove();
+            window.addComment = async (id) => { let txt = document.getElementById('newComment')?.value.trim(); if(!txt) { notyf.error('Введите текст'); return; } let form = new URLSearchParams({ comment: txt }); await api(`/api/tickets/${id}/comments`,'POST',form); notyf.success('Комментарий отправлен'); closeModal(); renderUI(); };
         };
-        window.openDetailedReview=async(id)=>{
-            let modal=document.createElement('div');modal.className='fixed inset-0 bg-black/70 flex items-center justify-center z-50';
-            modal.innerHTML=`<div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"><h3 class="text-xl font-bold mb-4">Оцените качество</h3><div class="space-y-4"><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div><div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded" onclick="this.closest('.fixed').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded" onclick="submitReview(${id})">Отправить</button></div></div></div>`;
+        window.openDetailedReview = async (id) => {
+            let modal = document.createElement('div'); modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50';
+            modal.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"><h3 class="text-xl font-bold mb-4">Оцените качество</h3><div class="space-y-4"><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div><div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded" onclick="this.closest('.fixed').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded" onclick="submitReview(${id})">Отправить</button></div></div></div>`;
             document.body.appendChild(modal);
-            modal.querySelectorAll('.stars').forEach(group=>{let crit=group.dataset.crit;group.querySelectorAll('.star').forEach(star=>{star.onclick=()=>{group.querySelectorAll('.star').forEach(s=>s.style.color='');star.style.color='#facc15';document.getElementById(`${crit}Val`).value=star.dataset.val;};});});
-            window.submitReview=async(id)=>{let overall=document.getElementById('overallVal')?.value,speed=document.getElementById('speedVal')?.value,prof=document.getElementById('profVal')?.value,politeness=document.getElementById('politenessVal')?.value,comment=document.getElementById('reviewComment')?.value||'';if(!overall||!speed||!prof||!politeness){notyf.error('Заполните все оценки');return;}let form=new URLSearchParams({overall,speed,professionalism:prof,politeness,comment});await api(`/api/tickets/${id}/detailed_review`,'POST',form);notyf.success('Спасибо за отзыв!');modal.remove();renderUI();};
+            modal.querySelectorAll('.stars').forEach(group => { let crit = group.dataset.crit; group.querySelectorAll('.star').forEach(star => { star.onclick = () => { group.querySelectorAll('.star').forEach(s=>s.style.color=''); star.style.color='#facc15'; document.getElementById(`${crit}Val`).value = star.dataset.val; }; }); });
+            window.submitReview = async (id) => { let overall = document.getElementById('overallVal')?.value, speed = document.getElementById('speedVal')?.value, prof = document.getElementById('profVal')?.value, politeness = document.getElementById('politenessVal')?.value, comment = document.getElementById('reviewComment')?.value||''; if(!overall||!speed||!prof||!politeness) { notyf.error('Заполните все оценки'); return; } let form = new URLSearchParams({ overall, speed, professionalism:prof, politeness, comment }); await api(`/api/tickets/${id}/detailed_review`,'POST',form); notyf.success('Спасибо за отзыв!'); modal.remove(); renderUI(); };
         };
     }
-    function renderNewTicket(container){
-        container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3><form id="newForm" class="space-y-4"><div><label>Название</label><input id="title" required></div><div><label>Описание</label><textarea id="desc" rows="3"></textarea></div><div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div><div><label>Категория</label><select id="category"></select></div><div class="flex items-center gap-2"><input type="checkbox" id="privacyConsent" required><label class="text-sm">Я согласен с <a href="/privacy" target="_blank" class="text-blue-600">политикой</a></label></div><button type="submit" class="btn-primary mt-2">Создать</button></form></div>`;
-        fetch('/api/categories').then(r=>r.json()).then(cats=>{let sel=document.getElementById('category');cats.forEach(c=>{let opt=document.createElement('option');opt.value=c.name;opt.innerText=c.name;sel.appendChild(opt);});});
-        document.getElementById('newForm').onsubmit=async(e)=>{e.preventDefault();let privacy=document.getElementById('privacyConsent').checked;if(!privacy){notyf.error('Необходимо согласие');return;}let body=new URLSearchParams({title:document.getElementById('title').value,description:document.getElementById('desc').value,priority:document.getElementById('priority').value,category:document.getElementById('category').value,privacy_accepted:privacy});await api('/api/tickets','POST',body);notyf.success('Заявка создана');renderUI();};
+    function renderNewTicket(container) {
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3><form id="newForm" class="space-y-4"><div><label>Название</label><input id="title" required></div><div><label>Описание</label><textarea id="desc" rows="3"></textarea></div><div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div><div><label>Категория</label><select id="category"></select></div><div class="flex items-center gap-2"><input type="checkbox" id="privacyConsent" required><label class="text-sm">Я согласен с <a href="/privacy" target="_blank" class="text-blue-600">политикой</a></label></div><button type="submit" class="btn-primary mt-2">Создать</button></form></div>`;
+        fetch('/api/categories').then(r=>r.json()).then(cats=>{ let sel=document.getElementById('category'); cats.forEach(c=>{ let opt=document.createElement('option'); opt.value=c.name; opt.innerText=c.name; sel.appendChild(opt); }); });
+        document.getElementById('newForm').onsubmit = async (e) => { e.preventDefault(); let privacy = document.getElementById('privacyConsent').checked; if(!privacy) { notyf.error('Необходимо согласие'); return; } let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value, category:document.getElementById('category').value, privacy_accepted:privacy }); await api('/api/tickets','POST',body); notyf.success('Заявка создана'); renderUI(); };
     }
-    async function renderKnowledge(container){
-        let articles=await api('/api/knowledge');
-        let wrapper=document.createElement('div');wrapper.className='card';wrapper.innerHTML=`<h3 class="knowledge-title">📚 База знаний</h3><input type="text" id="kbSearchInput" class="knowledge-search w-full" placeholder="Поиск..."><div id="articlesList"></div>`;container.appendChild(wrapper);
-        let searchInput=wrapper.querySelector('#kbSearchInput'),articlesDiv=wrapper.querySelector('#articlesList');
-        function render(a){if(a.length===0){articlesDiv.innerHTML='<div class="text-center text-gray-500 py-4">Статей не найдено</div>';return;}articlesDiv.innerHTML=a.map(art=>`<div class="article-card"><div class="article-title">${escapeHtml(art.title)}</div><div class="article-content">${escapeHtml(art.content)}</div></div>`).join('');}
+    async function renderKnowledge(container) {
+        let articles = await api('/api/knowledge');
+        let wrapper = document.createElement('div'); wrapper.className = 'card'; wrapper.innerHTML = `<h3 class="knowledge-title">📚 База знаний</h3><input type="text" id="kbSearchInput" class="knowledge-search w-full" placeholder="Поиск..."><div id="articlesList"></div>`; container.appendChild(wrapper);
+        let searchInput = wrapper.querySelector('#kbSearchInput'), articlesDiv = wrapper.querySelector('#articlesList');
+        function render(a) { if(a.length===0) { articlesDiv.innerHTML='<div class="text-center text-gray-500 py-4">Статей не найдено</div>'; return; } articlesDiv.innerHTML = a.map(art => `<div class="article-card"><div class="article-title">${escapeHtml(art.title)}</div><div class="article-content">${escapeHtml(art.content)}</div></div>`).join(''); }
         render(articles);
-        searchInput.addEventListener('input',async(e)=>{let q=e.target.value.trim();if(q==='')render(articles);else{let resp=await api(`/api/knowledge?search=${encodeURIComponent(q)}`);render(resp);}});
+        searchInput.addEventListener('input', async (e) => { let q = e.target.value.trim(); if(q==='') render(articles); else { let resp = await api(`/api/knowledge?search=${encodeURIComponent(q)}`); render(resp); } });
     }
-    async function renderOperatorTickets(container){
-        let data=await api('/api/tickets');
-        let html='<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Действия</th></tr></thead><tbody>';
-        for(let t of data.tickets){
-            let actions='';
-            if(t.status==='new')actions=`<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
-            else if(t.status==='in_progress')actions=`<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
-            else if(t.status==='resolved')actions=`<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html+=`<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Описание">${escapeHtml(t.description||'—')}<tr><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></table>`;
+    async function renderOperatorTickets(container) {
+        let data = await api('/api/tickets');
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Действия</th></tr></thead><tbody>';
+        for(let t of data.tickets) {
+            let actions = '';
+            if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
+            else if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
+            else if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
+            html += `</td><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Описание">${escapeHtml(t.description||'—')}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
         }
-        html+='</tbody>}</div>';
-        container.innerHTML=html;
-        window.assign=async(id)=>{await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT');renderUI();};
-        window.resolve=async(id)=>{let rev=prompt("Комментарий к решению:");if(rev!==null){await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT');renderUI();}};
-        window.closeTicket=async(id)=>{await api(`/api/tickets/${id}?status=closed`,'PUT');renderUI();};
-        window.respond=async(id)=>{let msg=prompt("Ответ клиенту:");if(msg){await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`,'PUT');renderUI();}};
-        window.viewTicket=async(id)=>{let ticketsData=await api('/api/tickets');let ticket=ticketsData.tickets.find(t=>t.id===id);if(!ticket)return;let comments=await api(`/api/tickets/${id}/comments`);let modalHtml=`<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c=>`<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea><div class="flex justify-end gap-2"><button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button><button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button></div></div></div>`;
-            document.body.insertAdjacentHTML('beforeend',modalHtml);
-            window.closeModal=()=>document.getElementById('ticketModal')?.remove();
-            window.addComment=async(id)=>{let txt=document.getElementById('newComment')?.value.trim();if(!txt){notyf.error('Введите текст');return;}let form=new URLSearchParams({comment:txt});await api(`/api/tickets/${id}/comments`,'POST',form);notyf.success('Комментарий отправлен');closeModal();renderUI();};
-        };
+        html += '</tbody>}</div>';
+        container.innerHTML = html;
+        window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
+        window.resolve = async (id) => { let rev = prompt("Комментарий к решению:"); if(rev!==null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
+        window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`,'PUT'); renderUI(); };
+        window.respond = async (id) => { let msg = prompt("Ответ клиенту:"); if(msg) { await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`,'PUT'); renderUI(); } };
+        window.viewTicket = async (id) => { let ticketsData = await api('/api/tickets'); let ticket = ticketsData.tickets.find(t => t.id === id); if(!ticket) return; let comments = await api(`/api/tickets/${id}/comments`); let modalHtml = `<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c=>`<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea><div class="flex justify-end gap-2"><button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button><button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button></div></div></div>`; document.body.insertAdjacentHTML('beforeend', modalHtml); window.closeModal = () => document.getElementById('ticketModal')?.remove(); window.addComment = async (id) => { let txt = document.getElementById('newComment')?.value.trim(); if(!txt) { notyf.error('Введите текст'); return; } let form = new URLSearchParams({ comment: txt }); await api(`/api/tickets/${id}/comments`,'POST',form); notyf.success('Комментарий отправлен'); closeModal(); renderUI(); }; };
     }
-    function renderExport(container){container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`;}
-    async function renderAdminUsers(container){
-        let users=await api('/api/users');
-        let html='<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
-        for(let u of users){
-            html+=`<tr><td data-label="ID">${u.id}</td><td data-label="Email">${escapeHtml(u.email)}</td><td data-label="ФИО">${escapeHtml(u.full_name)}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></td>`;
+    function renderExport(container) { container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`; }
+    async function renderAdminUsers(container) {
+        let users = await api('/api/users');
+        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
+        for(let u of users) {
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${escapeHtml(u.email)}</td><td data-label="ФИО">${escapeHtml(u.full_name)}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
-        html+='</tbody>}</div>';
-        container.innerHTML=html;
-        window.changeRole=async(id)=>{let newRole=document.getElementById(`role-${id}`).value;await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT');notyf.success('Роль изменена');renderAdminUsers(container);};
-        window.delUser=async(id)=>{if(confirm('Удалить пользователя?')){await api(`/api/users/${id}`,'DELETE');notyf.success('Пользователь удалён');renderAdminUsers(container);}};
+        html += '</tbody>}</div>';
+        container.innerHTML = html;
+        window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
+        window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await api(`/api/users/${id}`,'DELETE'); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
     }
-    async function renderAdminSLA(container){
-        let sla=await api('/api/admin/sla');
-        container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">Настройки SLA</h3><div><label>Время ответа High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}"></div><div><label>Время ответа Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}"></div><button class="btn-primary" id="saveSla">Сохранить</button></div>`;
-        document.getElementById('saveSla').onclick=async()=>{await api(`/api/admin/sla?response_high_hours=${document.getElementById('high').value}&response_medium_hours=${document.getElementById('medium').value}`,'PUT');notyf.success('Настройки сохранены');};
+    async function renderAdminSLA(container) {
+        let sla = await api('/api/admin/sla');
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Настройки SLA</h3><div><label>Время ответа High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}"></div><div><label>Время ответа Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}"></div><button class="btn-primary" id="saveSla">Сохранить</button></div>`;
+        document.getElementById('saveSla').onclick = async () => { await api(`/api/admin/sla?response_high_hours=${document.getElementById('high').value}&response_medium_hours=${document.getElementById('medium').value}`,'PUT'); notyf.success('Настройки сохранены'); };
     }
-    async function renderAdminLogs(container){
-        let logs=await api('/api/admin/logs');
-        let html=`<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>${logs.map(l=>`<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${escapeHtml(l.action)}</td><td data-label="Детали">${escapeHtml(l.details||'')}</td></tr>`).join('')}</tbody>}</div>`;
-        container.innerHTML=html;
+    async function renderAdminLogs(container) {
+        let logs = await api('/api/admin/logs');
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>${logs.map(l=>`<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${escapeHtml(l.action)}</td><td data-label="Детали">${escapeHtml(l.details||'')}</td></tr>`).join('')}</tbody>}</div>`;
+        container.innerHTML = html;
     }
-    async function renderDashboard(container){
-        let m=await api('/api/dashboard/metrics');
-        container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">📊 Дашборд качества</h3><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8"><div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl"><div class="text-sm">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div><div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl"><div class="text-sm">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div><div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl"><div class="text-sm">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div><div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-4 rounded-xl"><div class="text-sm">Соблюдение SLA</div><div class="text-3xl font-bold">${m.sla_compliance}%</div></div><div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl"><div class="text-sm">Ср. время решения</div><div class="text-3xl font-bold">${m.avg_resolution_minutes} <span class="text-lg">мин</span></div></div></div><div class="grid lg:grid-cols-2 gap-6"><div class="chart-container"><canvas id="statusChartDash" height="200"></canvas></div><div class="chart-container"><canvas id="trendChartDash" height="200"></canvas></div></div><div class="text-xs text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div></div>`;
-        const colors={new:'#facc15',in_progress:'#3b82f6',resolved:'#22c55e',closed:'#64748b'};
-        let statusLabels=Object.keys(m.status_counts),statusData=Object.values(m.status_counts);
-        let statusConfig={labels:statusLabels.map(s=>({new:'Новые',in_progress:'В работе',resolved:'Решённые',closed:'Закрытые'}[s]||s)),datasets:[{data:statusData,backgroundColor:statusLabels.map(s=>colors[s]||'#94a3b8')}]};
-        let trendConfig={labels:m.daily_labels,datasets:[{label:'Заявки',data:m.daily_data,borderColor:'#3b82f6',fill:true}]};
-        if(window.statusChart)window.statusChart.destroy();
-        if(window.trendChart)window.trendChart.destroy();
-        window.statusChart=new Chart(document.getElementById('statusChartDash'),{type:'pie',data:statusConfig,options:{responsive:true}});
-        window.trendChart=new Chart(document.getElementById('trendChartDash'),{type:'line',data:trendConfig,options:{responsive:true}});
+    async function renderDashboard(container) {
+        let m = await api('/api/dashboard/metrics');
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">📊 Дашборд качества</h3><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8"><div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl"><div class="text-sm">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div><div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl"><div class="text-sm">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div><div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl"><div class="text-sm">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div><div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-4 rounded-xl"><div class="text-sm">Соблюдение SLA</div><div class="text-3xl font-bold">${m.sla_compliance}%</div></div><div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl"><div class="text-sm">Ср. время решения</div><div class="text-3xl font-bold">${m.avg_resolution_minutes} <span class="text-lg">мин</span></div></div></div><div class="grid lg:grid-cols-2 gap-6"><div class="chart-container"><canvas id="statusChartDash" height="200"></canvas></div><div class="chart-container"><canvas id="trendChartDash" height="200"></canvas></div></div><div class="text-xs text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div></div>`;
+        const colors = { new:'#facc15', in_progress:'#3b82f6', resolved:'#22c55e', closed:'#64748b' };
+        let statusLabels = Object.keys(m.status_counts), statusData = Object.values(m.status_counts);
+        let statusConfig = { labels: statusLabels.map(s=>({new:'Новые', in_progress:'В работе', resolved:'Решённые', closed:'Закрытые'}[s]||s)), datasets: [{ data: statusData, backgroundColor: statusLabels.map(s=>colors[s]||'#94a3b8') }] };
+        let trendConfig = { labels: m.daily_labels, datasets: [{ label:'Заявки', data: m.daily_data, borderColor:'#3b82f6', fill: true }] };
+        if(window.statusChart) window.statusChart.destroy();
+        if(window.trendChart) window.trendChart.destroy();
+        window.statusChart = new Chart(document.getElementById('statusChartDash'), { type:'pie', data: statusConfig, options:{ responsive:true } });
+        window.trendChart = new Chart(document.getElementById('trendChartDash'), { type:'line', data: trendConfig, options:{ responsive:true } });
     }
-    async function renderAdvancedDashboard(container){
-        container.innerHTML=`<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3><div class="flex flex-wrap gap-4 mb-6"><div><label class="block text-sm">Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div><div><label class="block text-sm">Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div><div><label class="block text-sm">Категория</label><select id="categoryFilter"><option value="">Все</option></select></div><button class="btn-primary" id="applyFilters">Применить</button></div><div class="grid md:grid-cols-4 gap-4 mb-6"><div class="metric-card"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div></div><div class="mb-6 chart-container"><canvas id="operatorChart" height="300"></canvas></div><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody>}</div></div>`;
-        let users=await api('/api/users'),cats=await api('/api/categories');
-        let opSelect=document.getElementById('operatorFilter');opSelect.innerHTML='<option value="">Все</option>'+users.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}">${escapeHtml(u.full_name)}</option>`).join('');
-        let catSelect=document.getElementById('categoryFilter');catSelect.innerHTML='<option value="">Все</option>'+cats.map(c=>`<option value="${c.name}">${escapeHtml(c.name)}</option>`).join('');
-        const loadData=async()=>{
-            let period=document.getElementById('periodFilter').value,op_id=document.getElementById('operatorFilter').value,cat=document.getElementById('categoryFilter').value;
-            let params=new URLSearchParams({period});if(op_id)params.append('operator_id',op_id);if(cat)params.append('category',cat);
-            let data=await api(`/api/dashboard/advanced_metrics?${params}`);
-            document.getElementById('overallAvg').innerText=data.overall_avg;document.getElementById('speedAvg').innerText=data.speed_avg;
-            document.getElementById('profAvg').innerText=data.prof_avg;document.getElementById('politenessAvg').innerText=data.politeness_avg;
-            let tableHtml='',opColors=['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
-            for(let op of data.operator_stats){
-                let badge=op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
-                tableHtml+=`<tr><td class="font-medium">${escapeHtml(op.name)}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</tr>`;
+    async function renderAdvancedDashboard(container) {
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3><div class="flex flex-wrap gap-4 mb-6"><div><label class="block text-sm">Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div><div><label class="block text-sm">Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div><div><label class="block text-sm">Категория</label><select id="categoryFilter"><option value="">Все</option></select></div><button class="btn-primary" id="applyFilters">Применить</button></div><div class="grid md:grid-cols-4 gap-4 mb-6"><div class="metric-card"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div></div><div class="mb-6 chart-container"><canvas id="operatorChart" height="300"></canvas></div><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody>}</div></div>`;
+        let users = await api('/api/users'), cats = await api('/api/categories');
+        let opSelect = document.getElementById('operatorFilter'); opSelect.innerHTML = '<option value="">Все</option>' + users.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}">${escapeHtml(u.full_name)}</option>`).join('');
+        let catSelect = document.getElementById('categoryFilter'); catSelect.innerHTML = '<option value="">Все</option>' + cats.map(c=>`<option value="${c.name}">${escapeHtml(c.name)}</option>`).join('');
+        const loadData = async () => {
+            let period = document.getElementById('periodFilter').value, op_id = document.getElementById('operatorFilter').value, cat = document.getElementById('categoryFilter').value;
+            let params = new URLSearchParams({ period }); if(op_id) params.append('operator_id', op_id); if(cat) params.append('category', cat);
+            let data = await api(`/api/dashboard/advanced_metrics?${params}`);
+            document.getElementById('overallAvg').innerText = data.overall_avg; document.getElementById('speedAvg').innerText = data.speed_avg;
+            document.getElementById('profAvg').innerText = data.prof_avg; document.getElementById('politenessAvg').innerText = data.politeness_avg;
+            let tableHtml = '', opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
+            for(let op of data.operator_stats) {
+                let badge = op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
+                tableHtml += `<tr><td class="font-medium">${escapeHtml(op.name)}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</tr>`;
             }
-            document.getElementById('operatorTable').innerHTML=tableHtml;
-            let ctx=document.getElementById('operatorChart').getContext('2d');
-            if(window.opChart)window.opChart.destroy();
-            let labels=data.operator_stats.map(o=>o.name);
-            let overalls=data.operator_stats.map(o=>o.overall_avg);
-            window.opChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Общая оценка',data:overalls,backgroundColor:labels.map((_,i)=>opColors[i%opColors.length])}]}});
+            document.getElementById('operatorTable').innerHTML = tableHtml;
+            let ctx = document.getElementById('operatorChart').getContext('2d');
+            if(window.opChart) window.opChart.destroy();
+            let labels = data.operator_stats.map(o=>o.name);
+            let overalls = data.operator_stats.map(o=>o.overall_avg);
+            window.opChart = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'Общая оценка', data:overalls, backgroundColor:labels.map((_,i)=>opColors[i%opColors.length]) }] } });
         };
-        document.getElementById('applyFilters').addEventListener('click',loadData);
+        document.getElementById('applyFilters').addEventListener('click', loadData);
         loadData();
     }
     loadUser();
