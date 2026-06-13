@@ -262,7 +262,6 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
     updates = []
     params = []
 
-    # Получаем текущую заявку для проверки first_response_at
     c.execute("SELECT status, first_response_at FROM tickets WHERE id=?", (ticket_id,))
     current = c.fetchone()
     if not current:
@@ -274,7 +273,6 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
         updates.append("status=?")
         params.append(status)
         if status == "in_progress":
-            # Если заявка переходит в работу и first_response_at ещё не установлен
             if not first_resp:
                 updates.append("first_response_at=?")
                 params.append(datetime.now().isoformat())
@@ -624,7 +622,7 @@ def privacy_policy():
     """)
 
 # ------------------------------------------------------------
-# HTML (интерфейс)
+# HTML (интерфейс) с улучшенной читаемостью базы знаний
 # ------------------------------------------------------------
 @app.get("/")
 def index():
@@ -681,62 +679,63 @@ def index():
         .bg-red-600:hover { background: #b91c1c !important; transform: scale(1.02); }
         .bg-yellow-500:hover { background: #ca8a04 !important; transform: scale(1.02); }
         
-        /* ---------- Улучшенная читаемость для вкладки "База знаний" и поля поиска ---------- */
+        /* ---------- Улучшенная читаемость для вкладки "База знаний" ---------- */
         .knowledge-title {
-            font-size: 1.5rem !important;
+            font-size: 1.75rem !important;
             font-weight: 700 !important;
-            color: #111827 !important;
-            margin-bottom: 1rem !important;
+            margin-bottom: 1.25rem !important;
+            color: #0f172a !important;
         }
         body.dark .knowledge-title {
-            color: #f3f4f6 !important;
+            color: #f1f5f9 !important;
         }
         .knowledge-search {
             font-size: 1rem !important;
             padding: 0.75rem 1rem !important;
-            border: 1px solid #9ca3af !important;
             border-radius: 0.75rem !important;
+            border: 1px solid #cbd5e1 !important;
             background-color: #ffffff !important;
-            color: #1f2937 !important;
+            color: #1e293b !important;
             margin-bottom: 1.5rem !important;
         }
         body.dark .knowledge-search {
             background-color: #1e293b !important;
+            border-color: #475569 !important;
             color: #e2e8f0 !important;
-            border-color: #4b5563 !important;
         }
         .knowledge-search::placeholder {
-            color: #6b7280 !important;
+            color: #64748b !important;
             opacity: 1 !important;
         }
-        body.dark .knowledge-search::placeholder {
-            color: #9ca3af !important;
-        }
         .article-card {
-            background: #f9fafb;
-            border-radius: 1rem;
-            padding: 1rem;
-            margin-bottom: 0.75rem;
+            background: #f8fafc !important;
+            border-radius: 1rem !important;
+            padding: 1.25rem !important;
+            margin-bottom: 1rem !important;
             transition: all 0.2s;
+            border: 1px solid #e2e8f0 !important;
         }
         body.dark .article-card {
-            background: #2d3748;
+            background: #1e293b !important;
+            border-color: #334155 !important;
         }
         .article-title {
-            font-weight: 600;
-            font-size: 1.1rem;
-            margin-bottom: 0.25rem;
-            color: #0f172a;
+            font-size: 1.25rem !important;
+            font-weight: 700 !important;
+            margin-bottom: 0.5rem !important;
+            color: #0f172a !important;
+            line-height: 1.4 !important;
         }
         body.dark .article-title {
-            color: #f1f5f9;
+            color: #f1f5f9 !important;
         }
         .article-content {
-            color: #334155;
-            font-size: 0.9rem;
+            font-size: 1rem !important;
+            line-height: 1.6 !important;
+            color: #1e293b !important;
         }
         body.dark .article-content {
-            color: #cbd5e1;
+            color: #cbd5e1 !important;
         }
     </style>
 </head>
@@ -781,7 +780,6 @@ def index():
         document.getElementById('qrModal').classList.remove('hidden');
     });
 
-    // ---------- Улучшенная api с обработкой 401 ----------
     async function api(url, method='GET', body=null) {
         let opts = { method };
         if(body) {
@@ -790,7 +788,6 @@ def index():
         }
         let res = await fetch(url, opts);
         if (res.status === 401) {
-            // Очищаем все cookie
             document.cookie.split(";").forEach(c => {
                 document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
             });
@@ -871,7 +868,7 @@ def index():
     }
 
     // ------------------------------------------------------------
-    // Ролевой интерфейс с принудительной перерисовкой вкладок
+    // Ролевой интерфейс
     // ------------------------------------------------------------
     async function renderUI() {
         if(!currentUser) return;
@@ -933,14 +930,14 @@ def index():
         });
     }
 
-    // ---------------------- Рендеры для всех ролей ----------------------
+    // ---------------------- Рендеры ----------------------
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
         let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ</th><th>Действие</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actionBtn = '';
             if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
+            html += `<tr><td data-label="Номер">${t.id}<td data-label="Название">${t.title}<td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span><td data-label="Приоритет">${t.priority}<td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}<td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}<td data-label="Ответ">${t.review||'—'}<td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -1055,11 +1052,9 @@ def index():
         };
     }
 
-    // ИСПРАВЛЕННАЯ функция renderKnowledge с локальным поиском и улучшенной читаемостью
+    // Улучшенная База знаний с читаемыми стилями
     async function renderKnowledge(container) {
-        // Загружаем все статьи
         let articles = await api('/api/knowledge');
-        // Создаём структуру
         const wrapper = document.createElement('div');
         wrapper.className = 'card';
         wrapper.innerHTML = `
@@ -1104,7 +1099,6 @@ def index():
             if (query === '') {
                 filtered = articles;
             } else {
-                // Ищем на клиенте, можно и через API, но API уже есть
                 const response = await api(`/api/knowledge?search=${encodeURIComponent(query)}`);
                 filtered = response;
             }
@@ -1120,9 +1114,9 @@ def index():
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm hover:bg-yellow-600" onclick="assign(${t.id})">Принять</button>`;
             if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="respond(${t.id})">Ответить</button>`;
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description||'—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
+            html += `<tr><td data-label="Номер">${t.id}<td data-label="Название">${t.title}<td data-label="Описание">${t.description||'—'}<td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span><td data-label="Приоритет">${t.priority}<td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</tr>`;
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></tr></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
         window.resolve = async (id) => { let rev = prompt("Комментарий к решению (будет виден клиенту):"); if(rev !== null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
@@ -1180,7 +1174,7 @@ def index():
         let users = await api('/api/users');
         let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
+            html += `<tr><td data-label="ID">${u.id}<td data-label="Email">${u.email}<td data-label="ФИО">${u.full_name}<td data-label="Роль">${u.role}<td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -1200,7 +1194,7 @@ def index():
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
         let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
-        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
+        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}<td data-label="Пользователь">${l.user_id}<td data-label="Действие">${l.action}<td data-label="Детали">${l.details||''}</tr>`;
         html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
@@ -1274,7 +1268,7 @@ def index():
             const opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
             for(let op of data.operator_stats) {
                 let badge = op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
-                tableHtml += `<tr><td class="font-medium">${op.name}</td><td class="text-center">${op.count}</td><td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span></td><td class="text-center">${op.speed_avg}</td><td class="text-center">${op.prof_avg}</td><td class="text-center">${op.politeness_avg}</td></tr>`;
+                tableHtml += `<tr><td class="font-medium">${op.name}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
             const ctx = document.getElementById('operatorChart').getContext('2d');
