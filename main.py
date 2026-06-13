@@ -10,6 +10,11 @@ import csv
 import io
 import os
 
+# ---------- Функция для удаления суррогатных символов ----------
+def remove_surrogates(text: str) -> str:
+    """Заменяет суррогатные символы (U+D800–U+DFFF) на �"""
+    return text.encode('utf-8', errors='replace').decode('utf-8')
+
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=500)
@@ -595,7 +600,7 @@ def export_tickets(session: str = Cookie(None)):
 
 @app.get("/privacy")
 def privacy_policy():
-    return HTMLResponse("""
+    html = """
 <!DOCTYPE html>
 <html>
 <head>
@@ -622,14 +627,15 @@ def privacy_policy():
     <p><a href="/">Вернуться на сайт</a></p>
 </body>
 </html>
-    """)
+    """
+    return HTMLResponse(remove_surrogates(html))
 
 # ------------------------------------------------------------
 # HTML (интерфейс) с исправлениями: escapeHtml, полная дата/время, исправление модалки
 # ------------------------------------------------------------
 @app.get("/")
 def index():
-    return HTMLResponse("""
+    html_content = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -954,7 +960,7 @@ def index():
         for(let t of data.tickets) {
             let actionBtn = '';
             if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Статус"><span class="status-badge status-${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></td><td data-label="Приоритет">${escapeHtml(t.priority)}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${escapeHtml(t.review||'—')}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</tr>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Статус"><span class="status-badge status-${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></td><td data-label="Приоритет">${escapeHtml(t.priority)}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${escapeHtml(t.review||'—')}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -1124,7 +1130,7 @@ def index():
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="closeTicket(${t.id})">Закрыть</button>`;
             html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Описание">${escapeHtml(t.description||'—')}</td><td data-label="Статус"><span class="status-badge status-${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></td><td data-label="Приоритет">${escapeHtml(t.priority)}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></td></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
         window.resolve = async (id) => { let rev = prompt("Комментарий к решению (будет виден клиенту):"); if(rev !== null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
@@ -1293,7 +1299,10 @@ def index():
 </script>
 </body>
 </html>
-    """)
+    """
+    # Ключевое исправление: очистка HTML от суррогатных символов перед отправкой
+    safe_html = remove_surrogates(html_content)
+    return HTMLResponse(safe_html)
 
 if __name__ == "__main__":
     import os
