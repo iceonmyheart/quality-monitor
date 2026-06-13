@@ -12,9 +12,6 @@ import os
 import re
 import traceback
 
-# ------------------------------------------------------------
-# Очистка суррогатных символов
-# ------------------------------------------------------------
 def clean_text(text: str) -> str:
     if not text:
         return ""
@@ -40,9 +37,6 @@ else:
     DB_PATH = os.path.join(os.path.dirname(__file__), "monitoring.db")
 print(f"📁 База данных: {DB_PATH}", file=sys.stderr)
 
-# ------------------------------------------------------------
-# Инициализация базы данных (с тестовыми заявками)
-# ------------------------------------------------------------
 def init_db():
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -52,7 +46,7 @@ def init_db():
         conn = sqlite3.connect(":memory:")
         c = conn.cursor()
 
-    # Таблицы
+    # Таблицы (полный набор)
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE,
@@ -129,7 +123,6 @@ def init_db():
         created_at TEXT
     )''')
 
-    # Начальные данные
     c.execute("INSERT OR IGNORE INTO sla_settings VALUES ('response_high_hours', 2)")
     c.execute("INSERT OR IGNORE INTO sla_settings VALUES ('response_medium_hours', 8)")
     c.execute("INSERT OR IGNORE INTO categories VALUES (1, 'Технические проблемы')")
@@ -188,7 +181,6 @@ def init_db():
             resolved_dt = datetime.fromisoformat(resolved_at)
             resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
             c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
-        # Активные заявки
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
                     VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
@@ -201,7 +193,7 @@ init_db()
 sessions = {}
 
 # ------------------------------------------------------------
-# API эндпоинты (все строки очищаются через clean_text)
+# API (все эндпоинты с clean_text)
 # ------------------------------------------------------------
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...), privacy_accepted: bool = Form(...)):
@@ -663,7 +655,7 @@ def privacy_policy():
     return HTMLResponse(clean_text(html))
 
 # ------------------------------------------------------------
-# Главная страница с полным интерфейсом и адаптивными стилями
+# Главная страница – полный интерфейс с адаптацией темы и кнопками модального окна
 # ------------------------------------------------------------
 @app.get("/")
 def index():
@@ -721,7 +713,47 @@ def index():
         }
         button:active { transform: scale(0.98); }
         
-        /* ---------- БАЗА ЗНАНИЙ (адаптивные карточки) ---------- */
+        /* Стили для кнопок модального окна оценки */
+        .modal-btn-cancel {
+            background-color: #6c757d;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .modal-btn-cancel:hover {
+            background-color: #5a6268;
+            transform: scale(1.02);
+        }
+        .modal-btn-submit {
+            background-color: #28a745;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .modal-btn-submit:hover {
+            background-color: #218838;
+            transform: scale(1.02);
+        }
+        body.dark .modal-btn-cancel {
+            background-color: #495057;
+        }
+        body.dark .modal-btn-cancel:hover {
+            background-color: #343a40;
+        }
+        body.dark .modal-btn-submit {
+            background-color: #2c6e2c;
+        }
+        body.dark .modal-btn-submit:hover {
+            background-color: #1e5a1e;
+        }
+        
+        /* База знаний */
         .knowledge-title { font-size: 1.75rem; font-weight: 700; margin-bottom: 1.25rem; }
         .knowledge-search { font-size: 1rem; padding: 0.75rem 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem; }
         body.light .knowledge-search { background: #ffffff; border: 1px solid #cbd5e1; color: #1e293b; }
@@ -732,12 +764,12 @@ def index():
         .article-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; }
         .article-content { font-size: 1rem; line-height: 1.6; }
         
-        /* ---------- ДАШБОРД (адаптивные контейнеры графиков) ---------- */
+        /* Дашборд */
         .chart-container { border-radius: 0.75rem; padding: 1rem; transition: all 0.2s; }
         body.light .chart-container { background: #f8fafc; border: 1px solid #e2e8f0; }
         body.dark .chart-container { background: #0f172a; border: 1px solid #334155; }
         
-        /* ---------- АНАЛИТИКА (адаптивные метрики) ---------- */
+        /* Аналитика */
         .metric-card { border-radius: 0.75rem; padding: 1rem; text-align: center; transition: all 0.2s; }
         body.light .metric-card { background: #f1f5f9; color: #1e293b; border: 1px solid #e2e8f0; }
         body.dark .metric-card { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
@@ -778,7 +810,6 @@ def index():
         if(theme === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); document.getElementById('themeToggle').innerText = '☀️'; }
         else { document.body.classList.remove('dark'); document.body.classList.add('light'); document.getElementById('themeToggle').innerText = '🌙'; }
         localStorage.setItem('theme', theme);
-        // Перерисовываем графики
         if(window.statusChart) { window.statusChart.destroy(); window.trendChart.destroy(); window.opChart?.destroy(); }
         const activePane = document.querySelector('.tab-pane.active');
         if(activePane && window.currentTabs) {
@@ -897,7 +928,7 @@ def index():
             };
         });
     }
-    // ========== РЕНДЕРЫ (ПОЛНЫЕ ВЕРСИИ) ==========
+    // ========== РЕНДЕРЫ (с исправленными кнопками в модальном окне) ==========
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
         let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Оценка</th><th>Ответ</th><th>Действие</th></tr></thead><tbody>';
@@ -918,7 +949,7 @@ def index():
         };
         window.openDetailedReview = async (id) => {
             let modal = document.createElement('div'); modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50';
-            modal.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"><h3 class="text-xl font-bold mb-4">Оцените качество</h3><div class="space-y-4"><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div><div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded" onclick="this.closest('.fixed').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded" onclick="submitReview(${id})">Отправить</button></div></div></div>`;
+            modal.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"><h3 class="text-xl font-bold mb-4">Оцените качество</h3><div class="space-y-4"><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div><div class="flex justify-end gap-2"><button class="modal-btn-cancel" onclick="this.closest('.fixed').remove()">Отмена</button><button class="modal-btn-submit" onclick="submitReview(${id})">Отправить</button></div></div></div>`;
             document.body.appendChild(modal);
             modal.querySelectorAll('.stars').forEach(group => { let crit = group.dataset.crit; group.querySelectorAll('.star').forEach(star => { star.onclick = () => { group.querySelectorAll('.star').forEach(s=>s.style.color=''); star.style.color='#facc15'; document.getElementById(`${crit}Val`).value = star.dataset.val; }; }); });
             window.submitReview = async (id) => { let overall = document.getElementById('overallVal')?.value, speed = document.getElementById('speedVal')?.value, prof = document.getElementById('profVal')?.value, politeness = document.getElementById('politenessVal')?.value, comment = document.getElementById('reviewComment')?.value||''; if(!overall||!speed||!prof||!politeness) { notyf.error('Заполните все оценки'); return; } let form = new URLSearchParams({ overall, speed, professionalism:prof, politeness, comment }); await api(`/api/tickets/${id}/detailed_review`,'POST',form); notyf.success('Спасибо за отзыв!'); modal.remove(); renderUI(); };
@@ -939,7 +970,7 @@ def index():
     }
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Действия</th></td></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
@@ -960,7 +991,7 @@ def index():
         let users = await api('/api/users');
         let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}<tr><td data-label="Email">${escapeHtml(u.email)}</td><td data-label="ФИО">${escapeHtml(u.full_name)}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${escapeHtml(u.email)}</td><td data-label="ФИО">${escapeHtml(u.full_name)}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
         html += '</tbody>}</div>';
         container.innerHTML = html;
@@ -974,7 +1005,7 @@ def index():
     }
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
-        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th><tr></thead><tbody>${logs.map(l=>`<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${escapeHtml(l.action)}</td><td data-label="Детали">${escapeHtml(l.details||'')}</td></tr>`).join('')}</tbody>}</div>`;
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>${logs.map(l=>`<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${escapeHtml(l.action)}</td><td data-label="Детали">${escapeHtml(l.details||'')}</td></tr>`).join('')}</tbody>}</div>`;
         container.innerHTML = html;
     }
     async function renderDashboard(container) {
@@ -990,7 +1021,7 @@ def index():
         window.trendChart = new Chart(document.getElementById('trendChartDash'), { type:'line', data:trendConfig, options:{ responsive:true } });
     }
     async function renderAdvancedDashboard(container) {
-        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3><div class="flex flex-wrap gap-4 mb-6"><div><label class="block text-sm">Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div><div><label class="block text-sm">Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div><div><label class="block text-sm">Категория</label><select id="categoryFilter"><option value="">Все</option></select></div><button class="btn-primary" id="applyFilters">Применить</button></div><div class="grid md:grid-cols-4 gap-4 mb-6"><div class="metric-card"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div></div><div class="mb-6 chart-container"><canvas id="operatorChart" height="300"></canvas></div><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody>}</div></div>`;
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3><div class="flex flex-wrap gap-4 mb-6"><div><label class="block text-sm">Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div><div><label class="block text-sm">Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div><div><label class="block text-sm">Категория</label><select id="categoryFilter"><option value="">Все</option></select></div><button class="btn-primary" id="applyFilters">Применить</button></div><div class="grid md:grid-cols-4 gap-4 mb-6"><div class="metric-card"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div></div><div class="mb-6 chart-container"><canvas id="operatorChart" height="300"></canvas></div><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th><tr></thead><tbody id="operatorTable"></tbody>}</div></div>`;
         let users = await api('/api/users'), cats = await api('/api/categories');
         let opSelect = document.getElementById('operatorFilter'); opSelect.innerHTML = '<option value="">Все</option>' + users.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}">${escapeHtml(u.full_name)}</option>`).join('');
         let catSelect = document.getElementById('categoryFilter'); catSelect.innerHTML = '<option value="">Все</option>' + cats.map(c=>`<option value="${c.name}">${escapeHtml(c.name)}</option>`).join('');
