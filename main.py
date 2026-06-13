@@ -55,6 +55,7 @@ def init_db():
         conn = sqlite3.connect(":memory:")
         c = conn.cursor()
 
+    # Таблицы
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE,
@@ -131,6 +132,7 @@ def init_db():
         created_at TEXT
     )''')
 
+    # Начальные данные
     c.execute("INSERT OR IGNORE INTO sla_settings VALUES ('response_high_hours', 2)")
     c.execute("INSERT OR IGNORE INTO sla_settings VALUES ('response_medium_hours', 8)")
     c.execute("INSERT OR IGNORE INTO categories VALUES (1, 'Технические проблемы')")
@@ -663,7 +665,7 @@ def privacy_policy():
     return HTMLResponse(clean_text(html))
 
 # ------------------------------------------------------------
-# Главная страница с полным интерфейсом и адаптивными кнопками модального окна
+# Главная страница с полным интерфейсом и адаптивным модальным окном
 # ------------------------------------------------------------
 @app.get("/")
 def index():
@@ -708,7 +710,7 @@ def index():
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .ticket-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
         body.light .ticket-modal-content { background: white; color: #1e293b; }
-        body.dark .ticket-modal-content { background: #1e293b; color: #e2e8f0; }
+        body.dark .ticket-modal-content { background: #1e293b; color: #e2e8f0; border: 1px solid #475569; }
         .ticket-modal-content { border-radius: 1.5rem; padding: 1.5rem; width: 90%; max-width: 700px; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
         .comments-list { max-height: 40vh; overflow-y: auto; margin-bottom: 1rem; }
         .comment-item { border-radius: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem; }
@@ -755,6 +757,11 @@ def index():
         .modal-btn-submit:hover { background-color: #218838; transform: scale(1.02); }
         body.dark .modal-btn-cancel { background-color: #6c757d; }
         body.dark .modal-btn-submit { background-color: #28a745; }
+        
+        /* Звёзды в модальном окне (всегда жёлтые, но фон адаптируется) */
+        .star { color: #cbd5e1; transition: color 0.1s; }
+        body.dark .star { color: #4a5568; }
+        .star[style*="color: rgb(250, 204, 21)"], .star[style*="color: #facc15"] { color: #facc15 !important; }
     </style>
 </head>
 <body class="light">
@@ -932,7 +939,7 @@ def index():
         };
         window.openDetailedReview = async (id) => {
             let modal = document.createElement('div'); modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50';
-            modal.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"><h3 class="text-xl font-bold mb-4">Оцените качество</h3><div class="space-y-4"><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div><div class="flex justify-end gap-2"><button class="modal-btn-cancel" onclick="this.closest('.fixed').remove()">Отмена</button><button class="modal-btn-submit" onclick="submitReview(${id})">Отправить</button></div></div></div>`;
+            modal.innerHTML = `<div class="ticket-modal-content"><h3 class="text-xl font-bold mb-4">Оцените качество</h3><div class="space-y-4"><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div><div class="flex justify-end gap-2"><button class="modal-btn-cancel" onclick="this.closest('.fixed').remove()">Отмена</button><button class="modal-btn-submit" onclick="submitReview(${id})">Отправить</button></div></div></div>`;
             document.body.appendChild(modal);
             modal.querySelectorAll('.stars').forEach(group => { let crit = group.dataset.crit; group.querySelectorAll('.star').forEach(star => { star.onclick = () => { group.querySelectorAll('.star').forEach(s=>s.style.color=''); star.style.color='#facc15'; document.getElementById(`${crit}Val`).value = star.dataset.val; }; }); });
             window.submitReview = async (id) => {
@@ -970,7 +977,7 @@ def index():
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
             else if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
             else if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr><td data-label="Номер">${t.id}<td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Описание">${escapeHtml(t.description||'—')}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Описание">${escapeHtml(t.description||'—')}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></td>`;
         }
         html += '</tbody>}</div>';
         container.innerHTML = html;
@@ -1010,7 +1017,7 @@ def index():
     
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
-        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>${logs.map(l=>`<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${escapeHtml(l.action)}</td><td data-label="Детали">${escapeHtml(l.details||'')}</td></table>`).join('')}</tbody>}</div>`;
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>${logs.map(l=>`<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}<tr><td data-label="Действие">${escapeHtml(l.action)}</td><td data-label="Детали">${escapeHtml(l.details||'')}</td></tr>`).join('')}</tbody>}</div>`;
         container.innerHTML = html;
     }
     
@@ -1041,7 +1048,7 @@ def index():
             let tableHtml = '', opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
             for(let op of data.operator_stats) {
                 let badge = op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
-                tableHtml += `<tr><td class="font-medium">${escapeHtml(op.name)}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</tr>`;
+                tableHtml += `<tr><td class="font-medium">${escapeHtml(op.name)}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</td>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
             let ctx = document.getElementById('operatorChart').getContext('2d');
