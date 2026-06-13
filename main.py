@@ -14,7 +14,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # ------------------------------------------------------------
-# Инициализация базы данных с тестовыми заявками и пользователями
+# Инициализация базы данных (с тестовыми заявками)
 # ------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect("monitoring.db")
@@ -62,7 +62,9 @@ def init_db():
         ticket_id INTEGER,
         user_id INTEGER,
         comment TEXT,
-        created_at TEXT
+        created_at TEXT,
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS attachments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,13 +108,13 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
-    
+
     # Получаем id оператора
     c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
     op_row = c.fetchone()
     operator_id = op_row[0] if op_row else 2
 
-    # Тестовые заявки (15 штук)
+    # --- Тестовые заявки (15 штук) ---
     c.execute("SELECT COUNT(*) FROM tickets")
     if c.fetchone()[0] == 0:
         now = datetime.now()
@@ -168,7 +170,9 @@ sessions = {}
 
 # ---------------------------- API ----------------------------
 @app.post("/api/register")
-def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...)):
+def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...), privacy_accepted: bool = Form(...)):
+    if not privacy_accepted:
+        raise HTTPException(400, "Необходимо согласие на обработку персональных данных")
     if email == "admin@mail.ru":
         role = "admin"
     elif email == "operator@mail.ru":
@@ -235,7 +239,9 @@ def get_tickets(session: str = Cookie(None)):
     return {"tickets": tickets}
 
 @app.post("/api/tickets")
-def create_ticket(title: str = Form(...), description: str = Form(...), priority: str = Form(...), category: str = Form(""), session: str = Cookie(None)):
+def create_ticket(title: str = Form(...), description: str = Form(...), priority: str = Form(...), category: str = Form(""), privacy_accepted: bool = Form(...), session: str = Cookie(None)):
+    if not privacy_accepted:
+        raise HTTPException(400, "Необходимо согласие на обработку персональных данных")
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
@@ -291,6 +297,54 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
         conn.commit()
     conn.close()
     return {"message": "OK"}
+
+# ---------- Комментарии ----------
+@app.post("/api/tickets/{ticket_id}/comments")
+def add_comment(ticket_id: int, comment: str = Form(...), session: str = Cookie(None)):
+    if not session or session not in sessions:
+        raise HTTPException(401)
+    user = sessions[session]
+    conn = sqlite3.connect("monitoring.db")
+    c = conn.cursor()
+    c.execute("SELECT created_by_id, assigned_to_id FROM tickets WHERE id=?", (ticket_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Ticket not found")
+    created_by, assigned_to = row
+    if user["role"] not in ["admin", "quality"] and user["id"] not in (created_by, assigned_to):
+        conn.close()
+        raise HTTPException(403, "Access denied")
+    c.execute("INSERT INTO comments (ticket_id, user_id, comment, created_at) VALUES (?,?,?,?)",
+              (ticket_id, user["id"], comment, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    return {"message": "OK"}
+
+@app.get("/api/tickets/{ticket_id}/comments")
+def get_comments(ticket_id: int, session: str = Cookie(None)):
+    if not session or session not in sessions:
+        raise HTTPException(401)
+    user = sessions[session]
+    conn = sqlite3.connect("monitoring.db")
+    c = conn.cursor()
+    c.execute("SELECT created_by_id, assigned_to_id FROM tickets WHERE id=?", (ticket_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404)
+    created_by, assigned_to = row
+    if user["role"] not in ["admin", "quality"] and user["id"] not in (created_by, assigned_to):
+        conn.close()
+        raise HTTPException(403)
+    c.execute("""SELECT c.id, c.user_id, u.full_name, c.comment, c.created_at 
+                 FROM comments c 
+                 JOIN users u ON c.user_id = u.id 
+                 WHERE c.ticket_id=? 
+                 ORDER BY c.created_at ASC""", (ticket_id,))
+    comments = [{"id": row[0], "user_id": row[1], "user_name": row[2], "comment": row[3], "created_at": row[4]} for row in c.fetchall()]
+    conn.close()
+    return comments
 
 @app.post("/api/tickets/{ticket_id}/detailed_review")
 def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = Form(...),
@@ -410,7 +464,6 @@ def dashboard_metrics(session: str = Cookie(None)):
         "avg_resolution_minutes": round(avg_res, 0)
     }
 
-# Разрешаем доступ к списку пользователей для admin и quality
 @app.get("/api/users")
 def get_users(session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
@@ -523,8 +576,39 @@ def export_tickets(session: str = Cookie(None)):
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
+@app.get("/privacy")
+def privacy_policy():
+    return HTMLResponse("""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Политика обработки персональных данных</title>
+    <style>
+        body { font-family: system-ui; max-width: 800px; margin: 2rem auto; padding: 1rem; line-height: 1.5; }
+        h1 { color: #15803d; }
+    </style>
+</head>
+<body>
+    <h1>Политика обработки персональных данных</h1>
+    <p>Настоящая политика составлена в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных».</p>
+    <h2>1. Какие данные собираются</h2>
+    <p>При регистрации и создании заявок мы собираем: имя, email, текст обращения, приоритет, категорию, оценки и отзывы.</p>
+    <h2>2. Цели обработки</h2>
+    <p>Обработка данных осуществляется для предоставления услуг технической поддержки, улучшения качества обслуживания и формирования аналитики.</p>
+    <h2>3. Сроки хранения</h2>
+    <p>Данные хранятся в течение всего срока использования системы. По запросу пользователя данные могут быть удалены администратором.</p>
+    <h2>4. Права пользователя</h2>
+    <p>Вы можете запросить удаление своих данных, обратившись к администратору.</p>
+    <h2>5. Контакты</h2>
+    <p>Email: support@optimaset.ru</p>
+    <p><a href="/">Вернуться на сайт</a></p>
+</body>
+</html>
+    """)
+
 # ------------------------------------------------------------
-# HTML (полный интерфейс)
+# HTML (интерфейс)
 # ------------------------------------------------------------
 @app.get("/")
 def index():
@@ -580,6 +664,7 @@ def index():
         <div class="flex items-center gap-4">
             <button id="qrButton" class="text-2xl" title="QR-код сайта">📱</button>
             <button id="themeToggle" class="text-2xl">🌙</button>
+            <a href="/privacy" target="_blank" class="text-xs text-gray-500 hover:text-gray-700">Политика конфиденциальности</a>
             <div id="userPanel"></div>
         </div>
     </div>
@@ -652,12 +737,23 @@ def index():
                     <div><label class="block text-sm font-medium">Email</label><input id="regEmail" type="email" class="w-full"></div>
                     <div><label class="block text-sm font-medium">ФИО</label><input id="regName" class="w-full"></div>
                     <div><label class="block text-sm font-medium">Пароль</label><input id="regPassword" type="password" class="w-full"></div>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="regPrivacy" required>
+                        <label class="text-sm">Я согласен с <a href="/privacy" target="_blank">политикой обработки персональных данных</a></label>
+                    </div>
                     <button type="submit" class="btn-primary w-full">Зарегистрироваться</button>
                 </form>
             </div>
         `;
         document.getElementById('loginForm').onsubmit = async (e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch(e) { notyf.error('Ошибка входа'); } };
-        document.getElementById('registerForm').onsubmit = async (e) => { e.preventDefault(); let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value }); await fetch('/api/register', { method:'POST', body:form }); notyf.success('Регистрация успешна, теперь войдите'); };
+        document.getElementById('registerForm').onsubmit = async (e) => {
+            e.preventDefault();
+            let privacy = document.getElementById('regPrivacy').checked;
+            if(!privacy) { notyf.error('Необходимо согласие на обработку персональных данных'); return; }
+            let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value, privacy_accepted:privacy });
+            await fetch('/api/register', { method:'POST', body:form });
+            notyf.success('Регистрация успешна, теперь войдите');
+        };
     }
 
     async function renderUI() {
@@ -698,16 +794,65 @@ def index():
         document.querySelectorAll('.tab-btn').forEach((btn,idx)=>btn.onclick=()=>{ document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.add('hidden')); document.getElementById(`pane-${idx}`).classList.remove('hidden'); });
     }
 
+    // --- Клиентские функции с кнопкой "Открыть" ---
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ оператора</th><th>Действие</th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ</th><th>Действие</th></tr></thead><tbody>';
         for(let t of data.tickets) {
-            let action = '';
-            if(t.status === 'resolved' && !t.satisfaction) action = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description||'—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие">${action}</td></tr>`;
+            let actionBtn = '';
+            if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
+        
+        // Функция просмотра заявки с комментариями
+        window.viewTicket = async (id) => {
+            let ticketsData = await api('/api/tickets');
+            let ticket = ticketsData.tickets.find(t => t.id === id);
+            if (!ticket) return;
+            let comments = await api(`/api/tickets/${id}/comments`);
+            let modalHtml = `
+                <div id="ticketModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+                        <h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2>
+                        <div><strong>Название:</strong> ${ticket.title}</div>
+                        <div><strong>Описание:</strong> ${ticket.description || '—'}</div>
+                        <div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div>
+                        <div><strong>Приоритет:</strong> ${ticket.priority}</div>
+                        <div><strong>Категория:</strong> ${ticket.category || '—'}</div>
+                        <div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div>
+                        <hr class="my-4">
+                        <h3 class="font-semibold mb-2">Комментарии</h3>
+                        <div id="commentsList" class="space-y-2 max-h-60 overflow-y-auto mb-4">
+                            ${comments.map(c => `
+                                <div class="bg-gray-100 dark:bg-gray-700 p-2 rounded">
+                                    <span class="font-semibold">${c.user_name}</span> <span class="text-xs text-gray-500">${new Date(c.created_at).toLocaleString()}</span>
+                                    <div>${c.comment}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea>
+                        <div class="flex justify-end gap-2">
+                            <button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button>
+                            <button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            window.closeModal = () => document.getElementById('ticketModal')?.remove();
+            window.addComment = async (id) => {
+                let commentText = document.getElementById('newComment')?.value.trim();
+                if (!commentText) { notyf.error('Введите текст'); return; }
+                let form = new URLSearchParams({ comment: commentText });
+                await api(`/api/tickets/${id}/comments`, 'POST', form);
+                notyf.success('Комментарий отправлен');
+                closeModal();
+                renderUI();
+            };
+        };
+        
         window.openDetailedReview = async (id) => {
             const modal = document.createElement('div'); modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50';
             modal.innerHTML = `
@@ -757,12 +902,18 @@ def index():
             <div><label>Описание</label><textarea id="desc" rows="3"></textarea></div>
             <div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
             <div><label>Категория</label><select id="category"></select></div>
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="privacyConsent" required>
+                <label class="text-sm">Я согласен с <a href="/privacy" target="_blank">политикой обработки персональных данных</a></label>
+            </div>
             <button type="submit" class="btn-primary">Создать</button>
         </form></div>`;
         fetch('/api/categories').then(r=>r.json()).then(cats=>{ let sel=document.getElementById('category'); cats.forEach(c=>{ let opt=document.createElement('option'); opt.value=c.name; opt.innerText=c.name; sel.appendChild(opt); }); });
         document.getElementById('newForm').onsubmit = async (e) => {
             e.preventDefault();
-            let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value, category:document.getElementById('category').value });
+            let privacy = document.getElementById('privacyConsent').checked;
+            if(!privacy) { notyf.error('Необходимо согласие на обработку персональных данных'); return; }
+            let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value, category:document.getElementById('category').value, privacy_accepted:privacy });
             await api('/api/tickets','POST',body);
             notyf.success('Заявка создана');
             renderUI();
@@ -792,14 +943,54 @@ def index():
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
             if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description||'—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия">${actions}</td></tr>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description||'—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></tr></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
         window.resolve = async (id) => { let rev = prompt("Комментарий к решению (будет виден клиенту):"); if(rev !== null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
         window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`,'PUT'); renderUI(); };
         window.respond = async (id) => { let msg = prompt("Ответ клиенту:"); if(msg) { await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`,'PUT'); renderUI(); } };
+        window.viewTicket = async (id) => {
+            let ticketsData = await api('/api/tickets');
+            let ticket = ticketsData.tickets.find(t => t.id === id);
+            if (!ticket) return;
+            let comments = await api(`/api/tickets/${id}/comments`);
+            let modalHtml = `
+                <div id="ticketModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+                        <h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2>
+                        <div><strong>Название:</strong> ${ticket.title}</div>
+                        <div><strong>Описание:</strong> ${ticket.description || '—'}</div>
+                        <div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div>
+                        <div><strong>Приоритет:</strong> ${ticket.priority}</div>
+                        <div><strong>Категория:</strong> ${ticket.category || '—'}</div>
+                        <div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div>
+                        <hr class="my-4">
+                        <h3 class="font-semibold mb-2">Комментарии</h3>
+                        <div id="commentsList" class="space-y-2 max-h-60 overflow-y-auto mb-4">
+                            ${comments.map(c => `<div class="bg-gray-100 dark:bg-gray-700 p-2 rounded"><span class="font-semibold">${c.user_name}</span> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${c.comment}</div></div>`).join('')}
+                        </div>
+                        <textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea>
+                        <div class="flex justify-end gap-2">
+                            <button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button>
+                            <button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            window.closeModal = () => document.getElementById('ticketModal')?.remove();
+            window.addComment = async (id) => {
+                let commentText = document.getElementById('newComment')?.value.trim();
+                if (!commentText) { notyf.error('Введите текст'); return; }
+                let form = new URLSearchParams({ comment: commentText });
+                await api(`/api/tickets/${id}/comments`, 'POST', form);
+                notyf.success('Комментарий отправлен');
+                closeModal();
+                renderUI();
+            };
+        };
     }
 
     function renderExport(container) {
@@ -810,7 +1001,7 @@ def index():
         let users = await api('/api/users');
         let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></td>`;
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -831,7 +1022,7 @@ def index():
         let logs = await api('/api/admin/logs');
         let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
         for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
-        html += `</tbody></table></div>`;
+        html += `</tbody><td></div>`;
         container.innerHTML = html;
     }
 
@@ -904,7 +1095,7 @@ def index():
             const opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
             for(let op of data.operator_stats) {
                 let badge = op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
-                tableHtml += `<td><td class="font-medium">${op.name}</td><td class="text-center">${op.count}</td><td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span></td><td class="text-center">${op.speed_avg}</td><td class="text-center">${op.prof_avg}</td><td class="text-center">${op.politeness_avg}</td></tr>`;
+                tableHtml += `<tr><td class="font-medium">${op.name}</td><td class="text-center">${op.count}</td><td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span></td><td class="text-center">${op.speed_avg}</td><td class="text-center">${op.prof_avg}</td><td class="text-center">${op.politeness_avg}</td></tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
             const ctx = document.getElementById('operatorChart').getContext('2d');
