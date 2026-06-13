@@ -607,7 +607,7 @@ def privacy_policy():
     """)
 
 # ------------------------------------------------------------
-# HTML (интерфейс)
+# HTML (интерфейс) с исправленной читаемостью аналитики оценок
 # ------------------------------------------------------------
 @app.get("/")
 def index():
@@ -663,6 +663,22 @@ def index():
         .bg-green-600:hover { background: #166534 !important; transform: scale(1.02); }
         .bg-red-600:hover { background: #b91c1c !important; transform: scale(1.02); }
         .bg-yellow-500:hover { background: #ca8a04 !important; transform: scale(1.02); }
+        
+        /* Исправление читаемости для блоков аналитики оценок */
+        .metric-card {
+            border-radius: 0.75rem;
+            padding: 1rem;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        body.light .metric-card {
+            background: #f1f5f9;
+            color: #1e293b; /* чёрный текст на светлом фоне */
+        }
+        body.dark .metric-card {
+            background: #1e293b;
+            color: #e2e8f0; /* белый текст на тёмном фоне */
+        }
     </style>
 </head>
 <body class="light">
@@ -865,7 +881,7 @@ def index():
         for(let t of data.tickets) {
             let actionBtn = '';
             if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span><tr><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -998,7 +1014,7 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></td></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm hover:bg-yellow-600" onclick="assign(${t.id})">Принять</button>`;
@@ -1064,9 +1080,9 @@ def index():
         let users = await api('/api/users');
         let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}<tr><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></div>`;
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></div>`;
         }
-        html += `</tbody><tr></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
         window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await fetch(`/api/users/${id}`, { method:'DELETE' }); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
@@ -1083,8 +1099,8 @@ def index():
 
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
-        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></table></thead><tbody>`;
-        for(let l of logs) html += `<td><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
+        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
         html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
@@ -1128,10 +1144,10 @@ def index():
             <button class="btn-primary" id="applyFilters">Применить</button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div>
-            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div>
-            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div>
-            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div>
+            <div class="metric-card"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div>
+            <div class="metric-card"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div>
+            <div class="metric-card"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div>
+            <div class="metric-card"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div>
         </div>
         <div class="mb-6"><canvas id="operatorChart" height="300"></canvas></div>
         <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div>
