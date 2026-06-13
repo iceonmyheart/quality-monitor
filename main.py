@@ -1,6 +1,6 @@
 import uvicorn
-from fastapi import FastAPI, HTTPException, Form, Cookie, Response, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, PlainTextResponse
+from fastapi import FastAPI, HTTPException, Form, Cookie, Response
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from datetime import datetime, timedelta
@@ -9,56 +9,18 @@ import secrets
 import csv
 import io
 import os
-import sys
-import traceback
-import re
-
-# ------------------------------------------------------------
-# Очистка суррогатных символов
-# ------------------------------------------------------------
-def clean_text(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r'[\ud800-\udfff]', '', text)
-    return text.encode('utf-8', errors='replace').decode('utf-8')
 
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # ------------------------------------------------------------
-# Путь к БД (Render → /tmp, иначе локальная папка)
-# ------------------------------------------------------------
-if os.environ.get("RENDER"):
-    DB_PATH = os.path.join("/tmp", "monitoring.db")
-else:
-    DB_PATH = os.path.join(os.path.dirname(__file__), "monitoring.db")
-print(f"📁 База данных: {DB_PATH}", file=sys.stderr)
-
-# ------------------------------------------------------------
-# Диагностический middleware
-# ------------------------------------------------------------
-@app.middleware("http")
-async def catch_exceptions_middleware(request: Request, call_next):
-    try:
-        return await call_next(request)
-    except Exception as e:
-        error_text = f"Ошибка: {type(e).__name__}: {str(e)}\n\n{traceback.format_exc()}"
-        print(error_text, file=sys.stderr)
-        return PlainTextResponse(clean_text(error_text), status_code=500)
-
-# ------------------------------------------------------------
-# Инициализация БД (с тестовыми данными)
+# Инициализация базы данных (с тестовыми заявками)
 # ------------------------------------------------------------
 def init_db():
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-    except Exception as e:
-        print(f"❌ Ошибка подключения к {DB_PATH}: {e}", file=sys.stderr)
-        conn = sqlite3.connect(":memory:")
-        c = conn.cursor()
-
+    conn = sqlite3.connect("monitoring.db")
+    c = conn.cursor()
+    # Таблицы
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE,
@@ -134,18 +96,19 @@ def init_db():
         category_id INTEGER,
         created_at TEXT
     )''')
-
-    c.execute("INSERT OR IGNORE INTO sla_settings VALUES ('response_high_hours', 2)")
-    c.execute("INSERT OR IGNORE INTO sla_settings VALUES ('response_medium_hours', 8)")
-    c.execute("INSERT OR IGNORE INTO categories VALUES (1, 'Технические проблемы')")
-    c.execute("INSERT OR IGNORE INTO categories VALUES (2, 'Консультации')")
-    c.execute("INSERT OR IGNORE INTO categories VALUES (3, 'Доступ и права')")
-    c.execute("INSERT OR IGNORE INTO knowledge_articles VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO knowledge_articles VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO users VALUES (1, 'admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO users VALUES (2, 'operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO users VALUES (3, 'quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO users VALUES (4, 'client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
+    # Начальные данные
+    c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
+    c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
+    c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Технические проблемы')")
+    c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (2, 'Консультации')")
+    c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
+    c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
+    c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
+    # Предустановленные пользователи
+    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
+    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
+    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
+    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
 
     c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
     op_row = c.fetchone()
@@ -155,21 +118,21 @@ def init_db():
     if c.fetchone()[0] == 0:
         now = datetime.now()
         test_tickets = [
-            ("Не работает Wi-Fi в офисе", "С утра пропал Wi-Fi на всех устройствах...", "resolved", "high", "Технические проблемы", (now - timedelta(days=1)).isoformat(), operator_id, "Проверили оборудование, проблема в настройках DNS.", 4),
-            ("Не грузит CRM-система", "При входе в CRM вылетает ошибка 500.", "resolved", "critical", "Технические проблемы", (now - timedelta(days=2)).isoformat(), operator_id, "Сбой на сервере БД. Перезапустили службы.", 5),
-            ("Тормозит видеоконференция", "При звонках в Zoom постоянные задержки.", "resolved", "medium", "Технические проблемы", (now - timedelta(days=3)).isoformat(), operator_id, "Проблема в QoS роутера. Оптимизировали трафик.", 4),
-            ("Не отправляется почта через Outlook", "Исходящие письма зависают в очереди.", "resolved", "high", "Технические проблемы", (now - timedelta(days=4)).isoformat(), operator_id, "Обновили настройки SMTP-сервера.", 5),
-            ("Не синхронизируется OneDrive", "Папка не синхронизируется с облаком.", "resolved", "low", "Технические проблемы", (now - timedelta(days=5)).isoformat(), operator_id, "Сбросили кэш OneDrive.", 3),
-            ("Как настроить автоответ в Outlook?", "Нужна инструкция.", "resolved", "low", "Консультации", (now - timedelta(days=6)).isoformat(), operator_id, "Инструкция: Файл → Автоответчик → Включить.", 5),
-            ("Какие тарифы интернета для дома?", "Хочу подключить домашний интернет.", "resolved", "low", "Консультации", (now - timedelta(days=7)).isoformat(), operator_id, "Тарифы: 'Старт' 100 Мбит/с – 500 руб.", 4),
+            ("Не работает Wi-Fi в офисе", "С утра пропал Wi-Fi на всех устройствах. Роутер перезагружали – не помогло.", "resolved", "high", "Технические проблемы", (now - timedelta(days=1)).isoformat(), operator_id, "Проверили оборудование, проблема в настройках DNS. Восстановили доступ.", 4),
+            ("Не грузит CRM-система", "При входе в CRM вылетает ошибка 500. Работа встала.", "resolved", "critical", "Технические проблемы", (now - timedelta(days=2)).isoformat(), operator_id, "Обнаружен сбой на сервере БД. Перезапустили службы. Ошибка устранена.", 5),
+            ("Тормозит видеоконференция", "При звонках в Zoom постоянные задержки и разрывы.", "resolved", "medium", "Технические проблемы", (now - timedelta(days=3)).isoformat(), operator_id, "Проблема в настройках QoS вашего роутера. Оптимизировали трафик.", 4),
+            ("Не отправляется почта через Outlook", "Исходящие письма зависают в очереди.", "resolved", "high", "Технические проблемы", (now - timedelta(days=4)).isoformat(), operator_id, "Обновили настройки SMTP-сервера. Всё должно работать.", 5),
+            ("Не синхронизируется OneDrive", "Папка на рабочем столе не синхронизируется с облаком.", "resolved", "low", "Технические проблемы", (now - timedelta(days=5)).isoformat(), operator_id, "Сбросили кэш OneDrive. Рекомендуем обновить приложение.", 3),
+            ("Как настроить автоответ в Outlook?", "Нужна инструкция по настройке автоответчика.", "resolved", "low", "Консультации", (now - timedelta(days=6)).isoformat(), operator_id, "Инструкция: Файл → Автоответчик → Включить. Настройте текст.", 5),
+            ("Какие тарифы интернета для дома?", "Хочу подключить домашний интернет. Нужна консультация.", "resolved", "low", "Консультации", (now - timedelta(days=7)).isoformat(), operator_id, "Тарифы: 'Старт' 100 Мбит/с – 500 руб., 'Оптима' 300 Мбит/с – 700 руб.", 4),
             ("Как восстановить пароль от личного кабинета?", "Не приходит письмо для сброса.", "resolved", "medium", "Консультации", (now - timedelta(days=8)).isoformat(), operator_id, "Отправили одноразовую ссылку на резервный email.", 5),
             ("Выбор оборудования для офиса", "Нужен роутер и коммутаторы на 20 пользователей.", "resolved", "medium", "Консультации", (now - timedelta(days=9)).isoformat(), operator_id, "Рекомендуем MikroTik hAP ac2 + 2 коммутатора TP-Link.", 4),
-            ("Обучение работе в CRM", "Нужна консультация по основным функциям.", "resolved", "low", "Консультации", (now - timedelta(days=10)).isoformat(), operator_id, "Запишитесь на вебинар в четверг в 11:00.", 5),
-            ("Нет доступа к общей папке", "После смены пароля потерял доступ.", "resolved", "high", "Доступ и права", (now - timedelta(days=11)).isoformat(), operator_id, "Пользователь добавлен в группу доступа.", 5),
-            ("Не могу установить программу", "Требует прав администратора.", "resolved", "medium", "Доступ и права", (now - timedelta(days=12)).isoformat(), operator_id, "Создали заявку на удалённую установку.", 4),
-            ("Доступ к БД клиентов", "Менеджеру нужен доступ к таблице clients.", "resolved", "high", "Доступ и права", (now - timedelta(days=13)).isoformat(), operator_id, "Учётная запись с правами SELECT создана.", 5),
-            ("Не работает VPN после обновления", "Ошибка аутентификации.", "resolved", "critical", "Доступ и права", (now - timedelta(days=14)).isoformat(), operator_id, "Перевыпустили сертификат.", 5),
-            ("Добавить сотрудника в группу Бухгалтерия", "Нужен доступ к 1С.", "resolved", "medium", "Доступ и права", (now - timedelta(days=15)).isoformat(), operator_id, "Создали учётную запись, добавили в группу.", 5),
+            ("Обучение работе в CRM", "Нужна консультация по основным функциям.", "resolved", "low", "Консультации", (now - timedelta(days=10)).isoformat(), operator_id, "Запишитесь на вебинар в четверг в 11:00. Видеоуроки в базе знаний.", 5),
+            ("Нет доступа к общей папке", "После смены пароля потерял доступ к \\\\server\\docs", "resolved", "high", "Доступ и права", (now - timedelta(days=11)).isoformat(), operator_id, "Ваша учётная запись повторно добавлена в группу доступа. Перезагрузите компьютер.", 5),
+            ("Не могу установить программу", "При установке требует прав администратора.", "resolved", "medium", "Доступ и права", (now - timedelta(days=12)).isoformat(), operator_id, "Создали заявку на удалённую установку. Программа будет установлена в течение часа.", 4),
+            ("Доступ к БД клиентов", "Менеджеру нужен доступ к таблице clients.", "resolved", "high", "Доступ и права", (now - timedelta(days=13)).isoformat(), operator_id, "Учётная запись с правами SELECT создана. Данные отправлены в личное сообщение.", 5),
+            ("Не работает VPN после обновления", "Ошибка аутентификации при подключении.", "resolved", "critical", "Доступ и права", (now - timedelta(days=14)).isoformat(), operator_id, "Перевыпустили сертификат. Приложили новый файл. Установите его.", 5),
+            ("Добавить сотрудника в группу Бухгалтерия", "Нужен доступ к 1С и общим папкам.", "resolved", "medium", "Доступ и права", (now - timedelta(days=15)).isoformat(), operator_id, "Создали учётную запись, добавили в группу. Логин отправлен руководителю.", 5),
         ]
         for t in test_tickets:
             c.execute("""INSERT INTO tickets 
@@ -177,9 +140,9 @@ def init_db():
                 VALUES (?,?,?,?,?,?,?,?,?)""", t)
             ticket_id = c.lastrowid
             overall = t[8]
-            if overall >= 5:
+            if overall == 5:
                 speed = prof = politeness = 5
-            elif overall >= 4:
+            elif overall == 4:
                 speed = prof = politeness = 4
             else:
                 speed = prof = politeness = 3
@@ -193,26 +156,31 @@ def init_db():
             resolved_dt = datetime.fromisoformat(resolved_at)
             resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
             c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
+        # Активные заявки
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
                     VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
         c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
                     VALUES ('Проблема с биллингом', 'Двойное списание за услуги', 'in_progress', 'critical', 'Доступ и права', ?, 2)""", (now.isoformat(),))
     conn.commit()
     conn.close()
-    print("✅ База данных инициализирована", file=sys.stderr)
 
 init_db()
 sessions = {}
 
-# ------------------------------------------------------------
-# API эндпоинты
-# ------------------------------------------------------------
+# ---------------------------- API ----------------------------
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...), privacy_accepted: bool = Form(...)):
     if not privacy_accepted:
         raise HTTPException(400, "Необходимо согласие на обработку персональных данных")
-    role = "admin" if email == "admin@mail.ru" else "operator" if email == "operator@mail.ru" else "quality" if email == "quality@mail.ru" else "client"
-    conn = sqlite3.connect(DB_PATH)
+    if email == "admin@mail.ru":
+        role = "admin"
+    elif email == "operator@mail.ru":
+        role = "operator"
+    elif email == "quality@mail.ru":
+        role = "quality"
+    else:
+        role = "client"
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     try:
         c.execute("INSERT INTO users (email, full_name, hashed_password, role, created_at) VALUES (?,?,?,?,?)",
@@ -226,7 +194,7 @@ def register(email: str = Form(...), full_name: str = Form(...), password: str =
 
 @app.post("/api/login")
 def login(email: str = Form(...), password: str = Form(...), response: Response = None):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT id, full_name, role, hashed_password FROM users WHERE email=?", (email,))
     user = c.fetchone()
@@ -234,7 +202,7 @@ def login(email: str = Form(...), password: str = Form(...), response: Response 
     if not user or user[3] != password:
         raise HTTPException(400, "Invalid credentials")
     token = secrets.token_hex(32)
-    sessions[token] = {"id": user[0], "name": clean_text(user[1]), "role": user[2]}
+    sessions[token] = {"id": user[0], "name": user[1], "role": user[2]}
     response.set_cookie(key="session", value=token, httponly=True)
     return {"message": "OK", "role": user[2]}
 
@@ -256,7 +224,7 @@ def get_tickets(session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     if user["role"] == "client":
         c.execute("SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets WHERE created_by_id=?", (user["id"],))
@@ -264,21 +232,19 @@ def get_tickets(session: str = Cookie(None)):
         c.execute("SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets WHERE assigned_to_id=? OR assigned_to_id IS NULL", (user["id"],))
     else:
         c.execute("SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets")
-    tickets = [{"id": row[0], "title": clean_text(row[1]), "description": clean_text(row[2] or ""), "status": row[3],
-                "priority": row[4], "category": clean_text(row[5] or ""), "created_at": row[6],
-                "satisfaction": row[7], "review": clean_text(row[8] or "")} for row in c.fetchall()]
+    tickets = [{"id": row[0], "title": row[1], "description": row[2], "status": row[3], "priority": row[4],
+                "category": row[5], "created_at": row[6], "satisfaction": row[7], "review": row[8]} for row in c.fetchall()]
     conn.close()
     return {"tickets": tickets}
 
 @app.post("/api/tickets")
-def create_ticket(title: str = Form(...), description: str = Form(...), priority: str = Form(...),
-                  category: str = Form(""), privacy_accepted: bool = Form(...), session: str = Cookie(None)):
+def create_ticket(title: str = Form(...), description: str = Form(...), priority: str = Form(...), category: str = Form(""), privacy_accepted: bool = Form(...), session: str = Cookie(None)):
     if not privacy_accepted:
         raise HTTPException(400, "Необходимо согласие на обработку персональных данных")
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) VALUES (?,?,?,?,?,?,?)",
               (title, description, "new", priority, category, datetime.now().isoformat(), user["id"]))
@@ -292,40 +258,57 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
-    updates, params = [], []
+    updates = []
+    params = []
+
+    # Получаем текущую заявку для проверки first_response_at
     c.execute("SELECT status, first_response_at FROM tickets WHERE id=?", (ticket_id,))
     current = c.fetchone()
     if not current:
         conn.close()
         raise HTTPException(404, "Ticket not found")
-    _, first_resp = current
+    current_status, first_resp = current
+
     if status:
-        updates.append("status=?"); params.append(status)
+        updates.append("status=?")
+        params.append(status)
         if status == "in_progress":
+            # Если заявка переходит в работу и first_response_at ещё не установлен
             if not first_resp:
-                updates.append("first_response_at=?"); params.append(datetime.now().isoformat())
+                updates.append("first_response_at=?")
+                params.append(datetime.now().isoformat())
             if assigned_to_id is None:
                 assigned_to_id = user["id"]
         if status == "resolved":
             resolved_at = datetime.now().isoformat()
-            updates.append("resolved_at=?"); params.append(resolved_at)
+            updates.append("resolved_at=?")
+            params.append(resolved_at)
             c.execute("SELECT created_at FROM tickets WHERE id=?", (ticket_id,))
             row = c.fetchone()
             if row and row[0]:
                 created = datetime.fromisoformat(row[0])
                 resolved = datetime.fromisoformat(resolved_at)
                 resolution_minutes = int((resolved - created).total_seconds() / 60)
-                updates.append("resolution_time_minutes=?"); params.append(resolution_minutes)
+                updates.append("resolution_time_minutes=?")
+                params.append(resolution_minutes)
         if status == "closed":
-            updates.append("closed_at=?"); params.append(datetime.now().isoformat())
+            updates.append("closed_at=?")
+            params.append(datetime.now().isoformat())
+
     if assigned_to_id is not None:
-        updates.append("assigned_to_id=?"); params.append(assigned_to_id)
+        updates.append("assigned_to_id=?")
+        params.append(assigned_to_id)
+
     if satisfaction is not None:
-        updates.append("satisfaction=?"); params.append(satisfaction)
+        updates.append("satisfaction=?")
+        params.append(satisfaction)
+
     if review is not None:
-        updates.append("review=?"); params.append(review)
+        updates.append("review=?")
+        params.append(review)
+
     params.append(ticket_id)
     if updates:
         c.execute(f"UPDATE tickets SET {','.join(updates)} WHERE id=?", params)
@@ -338,17 +321,17 @@ def add_comment(ticket_id: int, comment: str = Form(...), session: str = Cookie(
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT created_by_id, assigned_to_id FROM tickets WHERE id=?", (ticket_id,))
     row = c.fetchone()
     if not row:
         conn.close()
-        raise HTTPException(404)
+        raise HTTPException(404, "Ticket not found")
     created_by, assigned_to = row
     if user["role"] not in ["admin", "quality"] and user["id"] not in (created_by, assigned_to):
         conn.close()
-        raise HTTPException(403)
+        raise HTTPException(403, "Access denied")
     c.execute("INSERT INTO comments (ticket_id, user_id, comment, created_at) VALUES (?,?,?,?)",
               (ticket_id, user["id"], comment, datetime.now().isoformat()))
     conn.commit()
@@ -360,7 +343,7 @@ def get_comments(ticket_id: int, session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT created_by_id, assigned_to_id FROM tickets WHERE id=?", (ticket_id,))
     row = c.fetchone()
@@ -372,8 +355,11 @@ def get_comments(ticket_id: int, session: str = Cookie(None)):
         conn.close()
         raise HTTPException(403)
     c.execute("""SELECT c.id, c.user_id, u.full_name, c.comment, c.created_at 
-                 FROM comments c JOIN users u ON c.user_id = u.id WHERE c.ticket_id=? ORDER BY c.created_at ASC""", (ticket_id,))
-    comments = [{"id": row[0], "user_id": row[1], "user_name": clean_text(row[2]), "comment": clean_text(row[3]), "created_at": row[4]} for row in c.fetchall()]
+                 FROM comments c 
+                 JOIN users u ON c.user_id = u.id 
+                 WHERE c.ticket_id=? 
+                 ORDER BY c.created_at ASC""", (ticket_id,))
+    comments = [{"id": row[0], "user_id": row[1], "user_name": row[2], "comment": row[3], "created_at": row[4]} for row in c.fetchall()]
     conn.close()
     return comments
 
@@ -383,7 +369,7 @@ def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = F
                         comment: str = Form(""), session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("INSERT INTO detailed_reviews (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at) VALUES (?,?,?,?,?,?,?)",
               (ticket_id, overall, speed, professionalism, politeness, comment, datetime.now().isoformat()))
@@ -395,7 +381,7 @@ def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = F
 def advanced_metrics(period: str = "month", operator_id: int = None, category: str = None, session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
         raise HTTPException(403)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     now = datetime.now()
     if period == "week":
@@ -414,44 +400,52 @@ def advanced_metrics(period: str = "month", operator_id: int = None, category: s
                WHERE dr.created_at >= ?"""
     params = [start_date]
     if operator_id:
-        query += " AND t.assigned_to_id = ?"; params.append(operator_id)
+        query += " AND t.assigned_to_id = ?"
+        params.append(operator_id)
     if category:
-        query += " AND t.category = ?"; params.append(category)
+        query += " AND t.category = ?"
+        params.append(category)
     c.execute(query, params)
     rows = c.fetchall()
     total = len(rows)
     if total == 0:
         conn.close()
-        return {"overall_avg":0, "speed_avg":0, "prof_avg":0, "politeness_avg":0, "operator_stats":[], "total_reviews":0}
-    overall_avg = sum(r[0] for r in rows)/total
-    speed_avg = sum(r[1] for r in rows)/total
-    prof_avg = sum(r[2] for r in rows)/total
-    politeness_avg = sum(r[3] for r in rows)/total
+        return {"overall_avg": 0, "speed_avg": 0, "prof_avg": 0, "politeness_avg": 0, "operator_stats": [], "total_reviews": 0}
+    overall_avg = sum(r[0] for r in rows) / total
+    speed_avg = sum(r[1] for r in rows) / total
+    prof_avg = sum(r[2] for r in rows) / total
+    politeness_avg = sum(r[3] for r in rows) / total
     op_stats = {}
     for r in rows:
         op_id = r[4]
         op_name = r[5] or "Не назначен"
         if op_id not in op_stats:
-            op_stats[op_id] = {"name": clean_text(op_name), "count":0, "overall_sum":0, "speed_sum":0, "prof_sum":0, "politeness_sum":0}
+            op_stats[op_id] = {"name": op_name, "count": 0, "overall_sum": 0, "speed_sum": 0, "prof_sum": 0, "politeness_sum": 0}
         op_stats[op_id]["count"] += 1
         op_stats[op_id]["overall_sum"] += r[0]
         op_stats[op_id]["speed_sum"] += r[1]
         op_stats[op_id]["prof_sum"] += r[2]
         op_stats[op_id]["politeness_sum"] += r[3]
     operator_stats = [{"name": d["name"], "count": d["count"],
-                      "overall_avg": round(d["overall_sum"]/d["count"],2),
-                      "speed_avg": round(d["speed_sum"]/d["count"],2),
-                      "prof_avg": round(d["prof_sum"]/d["count"],2),
-                      "politeness_avg": round(d["politeness_sum"]/d["count"],2)} for d in op_stats.values()]
+                      "overall_avg": round(d["overall_sum"]/d["count"], 2),
+                      "speed_avg": round(d["speed_sum"]/d["count"], 2),
+                      "prof_avg": round(d["prof_sum"]/d["count"], 2),
+                      "politeness_avg": round(d["politeness_sum"]/d["count"], 2)} for d in op_stats.values()]
     conn.close()
-    return {"overall_avg": round(overall_avg,2), "speed_avg": round(speed_avg,2), "prof_avg": round(prof_avg,2),
-            "politeness_avg": round(politeness_avg,2), "total_reviews": total, "operator_stats": operator_stats}
+    return {
+        "overall_avg": round(overall_avg, 2),
+        "speed_avg": round(speed_avg, 2),
+        "prof_avg": round(prof_avg, 2),
+        "politeness_avg": round(politeness_avg, 2),
+        "total_reviews": total,
+        "operator_stats": operator_stats
+    }
 
 @app.get("/api/dashboard/metrics")
 def dashboard_metrics(session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
         raise HTTPException(403)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM tickets")
     total = c.fetchone()[0]
@@ -476,18 +470,25 @@ def dashboard_metrics(session: str = Cookie(None)):
     c.execute("SELECT AVG(resolution_time_minutes) FROM tickets WHERE resolution_time_minutes IS NOT NULL AND resolution_time_minutes > 0")
     avg_res = c.fetchone()[0] or 0
     conn.close()
-    return {"total_tickets": total, "resolved_tickets": resolved, "avg_csat": round(avg_sat,2),
-            "status_counts": status_counts, "daily_labels": labels, "daily_data": data,
-            "sla_compliance": sla_compliance, "avg_resolution_minutes": round(avg_res,0)}
+    return {
+        "total_tickets": total,
+        "resolved_tickets": resolved,
+        "avg_csat": round(avg_sat, 2),
+        "status_counts": status_counts,
+        "daily_labels": labels,
+        "daily_data": data,
+        "sla_compliance": sla_compliance,
+        "avg_resolution_minutes": round(avg_res, 0)
+    }
 
 @app.get("/api/users")
 def get_users(session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
         raise HTTPException(403)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT id, email, full_name, role FROM users")
-    users = [{"id": row[0], "email": clean_text(row[1]), "full_name": clean_text(row[2]), "role": row[3]} for row in c.fetchall()]
+    users = [{"id": row[0], "email": row[1], "full_name": row[2], "role": row[3]} for row in c.fetchall()]
     conn.close()
     return users
 
@@ -495,7 +496,7 @@ def get_users(session: str = Cookie(None)):
 def change_role(user_id: int, new_role: str, session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
         raise HTTPException(403)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("UPDATE users SET role=? WHERE id=?", (new_role, user_id))
     conn.commit()
@@ -509,12 +510,12 @@ def delete_user(user_id: int, session: str = Cookie(None)):
     current_admin_id = sessions[session]["id"]
     if user_id == current_admin_id:
         raise HTTPException(400, "Нельзя удалить свою учётную запись")
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT id FROM users WHERE id=?", (user_id,))
     if not c.fetchone():
         conn.close()
-        raise HTTPException(404)
+        raise HTTPException(404, "Пользователь не найден")
     c.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
     conn.close()
@@ -524,10 +525,10 @@ def delete_user(user_id: int, session: str = Cookie(None)):
 def admin_logs(session: str = Cookie(None), limit: int = 100):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
         raise HTTPException(403)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT event_time, user_id, action, details FROM system_logs ORDER BY event_time DESC LIMIT ?", (limit,))
-    logs = [{"time": row[0], "user_id": row[1], "action": row[2], "details": clean_text(row[3] or "")} for row in c.fetchall()]
+    logs = [{"time": row[0], "user_id": row[1], "action": row[2], "details": row[3]} for row in c.fetchall()]
     conn.close()
     return logs
 
@@ -535,18 +536,18 @@ def admin_logs(session: str = Cookie(None), limit: int = 100):
 def admin_get_sla(session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
         raise HTTPException(403)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT param_key, param_value FROM sla_settings")
     rows = dict(c.fetchall())
     conn.close()
-    return {"response_high_hours": rows.get("response_high_hours",2), "response_medium_hours": rows.get("response_medium_hours",8)}
+    return {"response_high_hours": rows.get("response_high_hours", 2), "response_medium_hours": rows.get("response_medium_hours", 8)}
 
 @app.put("/api/admin/sla")
 def admin_update_sla(response_high_hours: int, response_medium_hours: int, session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
         raise HTTPException(403)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("UPDATE sla_settings SET param_value=? WHERE param_key=?", (response_high_hours, "response_high_hours"))
     c.execute("UPDATE sla_settings SET param_value=? WHERE param_key=?", (response_medium_hours, "response_medium_hours"))
@@ -556,22 +557,22 @@ def admin_update_sla(response_high_hours: int, response_medium_hours: int, sessi
 
 @app.get("/api/knowledge")
 def get_knowledge(search: str = ""):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     if search:
         c.execute("SELECT id, title, content, category_id FROM knowledge_articles WHERE title LIKE ? OR content LIKE ?", (f"%{search}%", f"%{search}%"))
     else:
         c.execute("SELECT id, title, content, category_id FROM knowledge_articles")
-    articles = [{"id": row[0], "title": clean_text(row[1]), "content": clean_text(row[2]), "category_id": row[3]} for row in c.fetchall()]
+    articles = [{"id": row[0], "title": row[1], "content": row[2], "category_id": row[3]} for row in c.fetchall()]
     conn.close()
     return articles
 
 @app.get("/api/categories")
 def get_categories():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT id, name FROM categories")
-    cats = [{"id": row[0], "name": clean_text(row[1])} for row in c.fetchall()]
+    cats = [{"id": row[0], "name": row[1]} for row in c.fetchall()]
     conn.close()
     return cats
 
@@ -579,39 +580,57 @@ def get_categories():
 def export_tickets(session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect("monitoring.db")
     c = conn.cursor()
     c.execute("SELECT id, title, description, status, priority, created_at, satisfaction, review FROM tickets")
     rows = c.fetchall()
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID","Title","Description","Status","Priority","Created","Satisfaction","Operator Response"])
+    writer.writerow(["ID", "Title", "Description", "Status", "Priority", "Created", "Satisfaction", "Operator Response"])
     for r in rows:
-        writer.writerow([r[0], clean_text(r[1]), clean_text(r[2] or ""), r[3], r[4], r[5], r[6] or "", clean_text(r[7] or "")])
+        writer.writerow([r[0], r[1], r[2], r[3], r[4], r[5], r[6] if r[6] else "", r[7] or ""])
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
 @app.get("/privacy")
 def privacy_policy():
-    return HTMLResponse(clean_text("""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Политика обработки персональных данных</title>
-<style>body{font-family:system-ui;max-width:800px;margin:2rem auto;padding:1rem;line-height:1.5;}</style>
-</head><body><h1>Политика обработки персональных данных</h1>
-<p>Настоящая политика составлена в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных».</p>
-<h2>1. Какие данные собираются</h2><p>При регистрации и создании заявок мы собираем: имя, email, текст обращения, приоритет, категорию, оценки и отзывы.</p>
-<h2>2. Цели обработки</h2><p>Обработка данных осуществляется для предоставления услуг технической поддержки, улучшения качества обслуживания и формирования аналитики.</p>
-<h2>3. Сроки хранения</h2><p>Данные хранятся в течение всего срока использования системы. По запросу пользователя данные могут быть удалены администратором.</p>
-<h2>4. Права пользователя</h2><p>Вы можете запросить удаление своих данных, обратившись к администратору.</p>
-<h2>5. Контакты</h2><p>Email: support@optimaset.ru</p><p><a href="/">Вернуться на сайт</a></p>
-</body></html>"""))
+    return HTMLResponse("""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Политика обработки персональных данных</title>
+    <style>
+        body { font-family: system-ui; max-width: 800px; margin: 2rem auto; padding: 1rem; line-height: 1.5; }
+        h1 { color: #15803d; }
+    </style>
+</head>
+<body>
+    <h1>Политика обработки персональных данных</h1>
+    <p>Настоящая политика составлена в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных».</p>
+    <h2>1. Какие данные собираются</h2>
+    <p>При регистрации и создании заявок мы собираем: имя, email, текст обращения, приоритет, категорию, оценки и отзывы.</p>
+    <h2>2. Цели обработки</h2>
+    <p>Обработка данных осуществляется для предоставления услуг технической поддержки, улучшения качества обслуживания и формирования аналитики.</p>
+    <h2>3. Сроки хранения</h2>
+    <p>Данные хранятся в течение всего срока использования системы. По запросу пользователя данные могут быть удалены администратором.</p>
+    <h2>4. Права пользователя</h2>
+    <p>Вы можете запросить удаление своих данных, обратившись к администратору.</p>
+    <h2>5. Контакты</h2>
+    <p>Email: support@optimaset.ru</p>
+    <p><a href="/">Вернуться на сайт</a></p>
+</body>
+</html>
+    """)
 
 # ------------------------------------------------------------
-# Главная страница — полный интерфейс с hash-навигацией
+# HTML (интерфейс) с исправлениями: escapeHtml, полная дата/время, исправление модалки
 # ------------------------------------------------------------
 @app.get("/")
 def index():
-    return HTMLResponse(clean_text("""<!DOCTYPE html>
+    return HTMLResponse("""
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -622,77 +641,114 @@ def index():
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css">
     <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
     <style>
-        :root {
-            --bg-page-light: #f1f5f9;
-            --bg-page-dark: #0f172a;
-            --text-light: #1e293b;
-            --text-dark: #e2e8f0;
-            --card-bg-light: #ffffff;
-            --card-bg-dark: #1e293b;
-            --border-light: #e2e8f0;
-            --border-dark: #334155;
-            --accent: #15803d;
-        }
         * { transition: all 0.2s ease; }
-        body.light { background: var(--bg-page-light); color: var(--text-light); }
-        body.dark { background: var(--bg-page-dark); color: var(--text-dark); }
-        .card { border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
-        body.light .card { background: var(--card-bg-light); border: 1px solid var(--border-light); }
-        body.dark .card { background: var(--card-bg-dark); border: 1px solid var(--border-dark); }
-        .btn-primary { background: var(--accent); color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; border: none; }
-        .btn-primary:hover { background: #166534; transform: scale(1.02); }
-        .tab-btn { padding: 0.5rem 1rem; border-radius: 2rem; cursor: pointer; }
+        body.light { background: #ffffff; color: #1e293b; }
+        body.dark { background: #0a192f; color: #e6f1ff; }
+        .card { background: var(--bg); border: 1px solid #e2e8f0; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; transition: transform 0.2s, box-shadow 0.2s; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+        body.light .card { background: #ffffff; border-color: #e2e8f0; }
+        body.dark .card { background: #1e293b; border-color: #334155; }
+        .btn-primary { background: #15803d; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; border: none; transition: all 0.2s; }
+        .btn-primary:hover { background: #166534; transform: scale(1.02); box-shadow: 0 4px 12px rgba(21,128,61,0.4); }
+        .tab-btn { padding: 0.5rem 1rem; border-radius: 2rem; cursor: pointer; transition: all 0.2s; }
         .tab-btn:hover { background: #15803d20; transform: translateY(-1px); }
-        body.light .tab-btn.active { background: var(--accent); color: white; }
-        body.dark .tab-btn.active { background: var(--accent); color: white; }
+        .tab-btn.active { background: #15803d; color: white; box-shadow: 0 2px 8px rgba(21,128,61,0.3); }
         .status-badge { display: inline-block; padding: 0.2rem 0.7rem; border-radius: 2rem; font-size: 0.7rem; font-weight: 600; }
-        body.light .status-new { background: #fef3c7; color: #b45309; }
-        body.dark .status-new { background: #713f12; color: #fde68a; }
-        body.light .status-in_progress { background: #dbeafe; color: #1d4ed8; }
-        body.dark .status-in_progress { background: #1e3a8a; color: #93c5fd; }
-        body.light .status-resolved { background: #dcfce7; color: #15803d; }
-        body.dark .status-resolved { background: #14532d; color: #86efac; }
-        body.light .status-closed { background: #f1f5f9; color: #475569; }
-        body.dark .status-closed { background: #334155; color: #cbd5e1; }
-        body.light input, body.light select, body.light textarea { background: #f8fafc; border: 1px solid var(--border-light); color: var(--text-light); }
-        body.dark input, body.dark select, body.dark textarea { background: #0f172a; border: 1px solid var(--border-dark); color: var(--text-dark); }
-        input, select, textarea { border-radius: 0.5rem; padding: 0.5rem; width: 100%; outline: none; }
-        input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px #15803d20; }
+        .status-new { background: #facc1520; color: #facc15; }
+        .status-in_progress { background: #3b82f620; color: #3b82f6; }
+        .status-resolved { background: #22c55e20; color: #22c55e; }
+        .status-closed { background: #64748b20; color: #94a3b8; }
+        input, select, textarea { border-radius: 0.5rem; padding: 0.5rem; width: 100%; outline: none; transition: border 0.2s, box-shadow 0.2s; }
+        body.light input, body.light select, body.light textarea { background: #f8fafc; border: 1px solid #cbd5e1; color: #1e293b; }
+        body.dark input, body.dark select, body.dark textarea { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; }
+        input:focus, select:focus, textarea:focus { border-color: #15803d; box-shadow: 0 0 0 2px #15803d20; }
+        .tab-pane { display: none; animation: fadeIn 0.3s ease-out; }
+        .tab-pane.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .ticket-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-        body.light .ticket-modal-content { background: var(--card-bg-light); color: var(--text-light); }
-        body.dark .ticket-modal-content { background: var(--card-bg-dark); color: var(--text-dark); }
-        .ticket-modal-content { border-radius: 1.5rem; padding: 1.5rem; width: 90%; max-width: 700px; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
-        .comment-item { border-radius: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem; }
-        body.light .comment-item { background: #f1f5f9; }
+        .ticket-modal-content { background: white; border-radius: 1.5rem; padding: 1.5rem; width: 90%; max-width: 700px; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); color: #1e293b; }
+        body.dark .ticket-modal-content { background: #1e293b; color: #e6f1ff; }
+        .comments-list { max-height: 40vh; overflow-y: auto; margin-bottom: 1rem; }
+        .comment-item { background: #f1f5f9; border-radius: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem; }
         body.dark .comment-item { background: #334155; }
-        .knowledge-title { font-size: 1.75rem; font-weight: 700; margin-bottom: 1.25rem; }
-        .knowledge-search { font-size: 1rem; padding: 0.75rem 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem; }
-        body.light .knowledge-search { background: var(--card-bg-light); border: 1px solid var(--border-light); color: var(--text-light); }
-        body.dark .knowledge-search { background: #1e293b; border: 1px solid #475569; color: var(--text-dark); }
-        .article-card { border-radius: 1rem; padding: 1.25rem; margin-bottom: 1rem; }
-        body.light .article-card { background: #f8fafc; border: 1px solid var(--border-light); }
-        body.dark .article-card { background: #0f172a; border: 1px solid var(--border-dark); }
-        .article-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; }
-        .article-content { font-size: 1rem; line-height: 1.6; }
-        .metric-card { border-radius: 0.75rem; padding: 1rem; text-align: center; }
-        body.light .metric-card { background: #f1f5f9; color: var(--text-light); }
-        body.dark .metric-card { background: #1e293b; color: var(--text-dark); }
-        .chart-container { background: var(--card-bg-light); border-radius: 0.75rem; padding: 1rem; }
-        body.dark .chart-container { background: var(--card-bg-dark); }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid; }
-        body.light th, body.light td { border-color: var(--border-light); }
-        body.dark th, body.dark td { border-color: var(--border-dark); }
+        @media (max-width: 640px) {
+            .ticket-modal-content { padding: 1rem; width: 95%; }
+            .tab-btn { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+            .btn-primary { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+        }
+        button:active { transform: scale(0.98); }
+        .bg-blue-600:hover { background: #1d4ed8 !important; transform: scale(1.02); }
+        .bg-green-600:hover { background: #166534 !important; transform: scale(1.02); }
+        .bg-red-600:hover { background: #b91c1c !important; transform: scale(1.02); }
+        .bg-yellow-500:hover { background: #ca8a04 !important; transform: scale(1.02); }
+        
+        /* ---------- Улучшенная читаемость для вкладки "База знаний" и поля поиска ---------- */
+        .knowledge-title {
+            font-size: 1.5rem !important;
+            font-weight: 700 !important;
+            color: #111827 !important;
+            margin-bottom: 1rem !important;
+        }
+        body.dark .knowledge-title {
+            color: #f3f4f6 !important;
+        }
+        .knowledge-search {
+            font-size: 1rem !important;
+            padding: 0.75rem 1rem !important;
+            border: 1px solid #9ca3af !important;
+            border-radius: 0.75rem !important;
+            background-color: #ffffff !important;
+            color: #1f2937 !important;
+            margin-bottom: 1.5rem !important;
+        }
+        body.dark .knowledge-search {
+            background-color: #1e293b !important;
+            color: #e2e8f0 !important;
+            border-color: #4b5563 !important;
+        }
+        .knowledge-search::placeholder {
+            color: #6b7280 !important;
+            opacity: 1 !important;
+        }
+        body.dark .knowledge-search::placeholder {
+            color: #9ca3af !important;
+        }
+        .article-card {
+            background: #f9fafb;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            transition: all 0.2s;
+        }
+        body.dark .article-card {
+            background: #2d3748;
+        }
+        .article-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+            color: #0f172a;
+        }
+        body.dark .article-title {
+            color: #f1f5f9;
+        }
+        .article-content {
+            color: #334155;
+            font-size: 0.9rem;
+        }
+        body.dark .article-content {
+            color: #cbd5e1;
+        }
     </style>
 </head>
 <body class="light">
 <div class="max-w-7xl mx-auto px-4 py-6 container">
-    <div class="flex justify-between items-center mb-8 p-4 bg-white dark:bg-gray-800 shadow rounded-2xl border">
-        <div><h1 class="text-2xl font-bold text-gray-800 dark:text-white">Quality Monitor Pro</h1><p class="text-xs text-gray-500 dark:text-gray-400">Мониторинг качества услуг и технической поддержки</p></div>
-        <div class="flex gap-4 items-center">
-            <button id="themeToggle" class="text-2xl hover:scale-110">🌙</button>
-            <button id="qrButton" class="text-2xl hover:scale-110">📱</button>
-            <a href="/privacy" target="_blank" class="text-xs text-gray-500 dark:text-gray-400 hover:underline">Политика</a>
+    <div class="flex justify-between items-center mb-8 p-4 bg-white shadow rounded-2xl border">
+        <div class="flex items-center gap-3"><div class="text-3xl">📊</div><div><h1 class="text-2xl font-bold text-gray-800">Quality Monitor Pro</h1><p class="text-xs text-gray-500">Мониторинг качества услуг и технической поддержки</p></div></div>
+        <div class="flex items-center gap-4">
+            <button id="qrButton" class="text-2xl hover:scale-110 transition">📱</button>
+            <button id="themeToggle" class="text-2xl hover:scale-110 transition">🌙</button>
+            <a href="/privacy" target="_blank" class="text-xs text-gray-500 hover:text-gray-700 transition">Политика конфиденциальности</a>
             <div id="userPanel"></div>
         </div>
     </div>
@@ -700,83 +756,137 @@ def index():
 </div>
 <div id="qrModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
     <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 text-center max-w-sm">
-        <h3 class="text-lg font-bold mb-2">QR-код ссылки</h3>
-        <img id="qrImage" src="" class="mx-auto my-4 w-48"><p class="text-sm break-all" id="qrUrl"></p>
-        <button class="mt-4 bg-gray-500 text-white px-4 py-2 rounded" onclick="document.getElementById('qrModal').classList.add('hidden')">Закрыть</button>
+        <h3 class="text-lg font-bold mb-2">QR-код ссылки на сайт</h3>
+        <img id="qrImage" src="" alt="QR Code" class="mx-auto my-4">
+        <p class="text-sm break-all" id="qrUrl"></p>
+        <button class="mt-4 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600" onclick="document.getElementById('qrModal').classList.add('hidden')">Закрыть</button>
     </div>
 </div>
 <script>
-    let currentUser = null, theme = localStorage.getItem('theme') || 'light';
-    let currentTabs = [], tabIdToIndex = {};
-    let isUpdatingHash = false;
+    // Глобальная функция экранирования HTML
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
+            return c;
+        });
+    }
+
+    let currentUser = null;
+    let theme = localStorage.getItem('theme') || 'light';
     const notyf = new Notyf({ duration:3000, position:{x:'right',y:'top'} });
 
     function applyTheme() {
-        if(theme === 'dark') {
-            document.body.classList.remove('light'); document.body.classList.add('dark');
-            document.getElementById('themeToggle').innerText = '☀️';
-        } else {
-            document.body.classList.remove('dark'); document.body.classList.add('light');
-            document.getElementById('themeToggle').innerText = '🌙';
-        }
+        if(theme === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); document.getElementById('themeToggle').innerText = '☀️'; }
+        else { document.body.classList.remove('dark'); document.body.classList.add('light'); document.getElementById('themeToggle').innerText = '🌙'; }
         localStorage.setItem('theme', theme);
-        // Пересоздаём графики
-        if(window.statusChart) {
-            const ctxStatus = document.getElementById('statusChartDash')?.getContext('2d');
-            const ctxTrend = document.getElementById('trendChartDash')?.getContext('2d');
-            const ctxOp = document.getElementById('operatorChart')?.getContext('2d');
-            const textColor = theme === 'dark' ? '#e2e8f0' : '#1e293b';
-            if(ctxStatus && window.statusChartData) {
-                window.statusChart.destroy();
-                window.statusChart = new Chart(ctxStatus, { type:'pie', data:window.statusChartData, options:{ responsive:true, plugins:{ legend:{ labels:{ color:textColor } } } } });
-            }
-            if(ctxTrend && window.trendChartData) {
-                window.trendChart.destroy();
-                window.trendChart = new Chart(ctxTrend, { type:'line', data:window.trendChartData, options:{ responsive:true, plugins:{ legend:{ labels:{ color:textColor } } }, scales:{ x:{ ticks:{ color:textColor } }, y:{ ticks:{ color:textColor } } } } });
-            }
-            if(ctxOp && window.opChartData) {
-                window.opChart.destroy();
-                window.opChart = new Chart(ctxOp, { type:'bar', data:window.opChartData, options:{ responsive:true, plugins:{ legend:{ labels:{ color:textColor } } }, scales:{ x:{ ticks:{ color:textColor } }, y:{ ticks:{ color:textColor } } } } });
-            }
-        }
-        const activePane = document.querySelector('.tab-pane.active');
-        if(activePane && currentTabs) {
-            const idx = activePane.id.split('-')[1];
-            if(currentTabs[idx]) currentTabs[idx].render(activePane);
-        }
     }
+    applyTheme();
     document.getElementById('themeToggle').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; applyTheme(); };
-    document.getElementById('qrButton').onclick = () => { let url = window.location.href.split('#')[0]; document.getElementById('qrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`; document.getElementById('qrUrl').innerText = url; document.getElementById('qrModal').classList.remove('hidden'); };
+    document.getElementById('qrButton').addEventListener('click', function() {
+        let url = window.location.href;
+        let qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+        document.getElementById('qrImage').src = qrSrc;
+        document.getElementById('qrUrl').innerText = url;
+        document.getElementById('qrModal').classList.remove('hidden');
+    });
 
+    // ---------- Улучшенная api с обработкой 401 ----------
     async function api(url, method='GET', body=null) {
         let opts = { method };
-        if(body) { opts.body = body; opts.headers = {'Content-Type':'application/x-www-form-urlencoded'}; }
+        if(body) {
+            opts.body = body;
+            opts.headers = {'Content-Type':'application/x-www-form-urlencoded'};
+        }
         let res = await fetch(url, opts);
-        if(res.status === 401) {
-            document.cookie.split(";").forEach(c => document.cookie = c.replace(/^ +/,"").replace(/=.*/,"=;expires="+new Date().toUTCString()+";path=/"));
-            if(currentUser) { currentUser = null; renderLogin(); }
+        if (res.status === 401) {
+            // Очищаем все cookie
+            document.cookie.split(";").forEach(c => {
+                document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+            });
+            if (currentUser !== null) {
+                currentUser = null;
+                renderLogin();
+            }
             throw new Error('Unauthorized');
         }
         if(!res.ok) throw new Error(await res.text());
         return res.json();
     }
-    async function login(email, password) { let form = new URLSearchParams({email,password}); await api('/api/login','POST',form); await loadUser(); }
+
+    async function login(email, password) {
+        let form = new URLSearchParams({email,password});
+        await api('/api/login','POST',form);
+        await loadUser();
+    }
+
     async function loadUser() {
         try {
             currentUser = await api('/api/me');
-            document.getElementById('userPanel').innerHTML = `<span class="font-medium">${escapeHtml(currentUser.name)}</span><span class="bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-sm ml-2">${currentUser.role}</span><button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm ml-2" onclick="logout()">Выйти</button>`;
+            document.getElementById('userPanel').innerHTML = `<span class="font-medium">${escapeHtml(currentUser.name)}</span><span class="bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-sm">${escapeHtml(currentUser.role)}</span><button class="bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded-full text-sm transition" onclick="logout()">Выйти</button>`;
             renderUI();
-        } catch(e) { currentUser = null; renderLogin(); }
+        } catch(e) {
+            currentUser = null;
+            document.cookie.split(";").forEach(c => {
+                document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+            });
+            renderLogin();
+        }
     }
-    async function logout() { try { await api('/api/logout','POST'); } catch(e) {} currentUser = null; renderLogin(); }
-    function escapeHtml(s) { if(!s) return ''; return s.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+
+    async function logout() {
+        try { await api('/api/logout','POST'); } catch(e) {}
+        currentUser = null;
+        renderLogin();
+    }
 
     function renderLogin() {
-        document.getElementById('app').innerHTML = `<div class="max-w-md mx-auto card"><h2 class="text-2xl font-bold mb-4">Вход</h2><form id="loginForm"><div><label>Email</label><input id="email" type="email" class="w-full"></div><div><label>Пароль</label><input id="password" type="password" class="w-full"></div><button type="submit" class="btn-primary w-full mt-2">Войти</button></form><hr class="my-6"><h3 class="text-xl font-semibold mb-4">Регистрация</h3><form id="registerForm"><div><label>Email</label><input id="regEmail" type="email"></div><div><label>ФИО</label><input id="regName"></div><div><label>Пароль</label><input id="regPassword" type="password"></div><div class="flex items-center gap-2"><input type="checkbox" id="regPrivacy" required><label>Я согласен с <a href="/privacy" target="_blank" class="text-blue-600">политикой</a></label></div><button type="submit" class="btn-primary w-full mt-2">Зарегистрироваться</button></form></div>`;
-        document.getElementById('loginForm').onsubmit = async(e) => { e.preventDefault(); try { await login(e.target.email.value, e.target.password.value); notyf.success('Вход выполнен'); } catch(e) { notyf.error('Ошибка входа'); } };
-        document.getElementById('registerForm').onsubmit = async(e) => { e.preventDefault(); let privacy = document.getElementById('regPrivacy').checked; if(!privacy) { notyf.error('Согласие обязательно'); return; } let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value, privacy_accepted:privacy }); await fetch('/api/register',{ method:'POST', body:form }); notyf.success('Регистрация успешна, теперь войдите'); };
+        document.getElementById('app').innerHTML = `
+            <div class="max-w-md mx-auto card">
+                <h2 class="text-2xl font-bold mb-4">Вход</h2>
+                <form id="loginForm" class="space-y-4">
+                    <div><label class="block text-sm font-medium">Email</label><input id="email" type="email" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Пароль</label><input id="password" type="password" class="w-full"></div>
+                    <button type="submit" class="btn-primary w-full">Войти</button>
+                </form>
+                <hr class="my-6 border-gray-200 dark:border-gray-700">
+                <h3 class="text-xl font-semibold mb-4">Регистрация</h3>
+                <form id="registerForm" class="space-y-4">
+                    <div><label class="block text-sm font-medium">Email</label><input id="regEmail" type="email" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">ФИО</label><input id="regName" class="w-full"></div>
+                    <div><label class="block text-sm font-medium">Пароль</label><input id="regPassword" type="password" class="w-full"></div>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="regPrivacy" required>
+                        <label class="text-sm">Я согласен с <a href="/privacy" target="_blank" class="text-blue-600 hover:underline">политикой обработки персональных данных</a></label>
+                    </div>
+                    <button type="submit" class="btn-primary w-full">Зарегистрироваться</button>
+                </form>
+            </div>
+        `;
+        document.getElementById('loginForm').onsubmit = async (e) => {
+            e.preventDefault();
+            try {
+                await login(e.target.email.value, e.target.password.value);
+                notyf.success('Вход выполнен');
+            } catch(e) { notyf.error('Ошибка входа'); }
+        };
+        document.getElementById('registerForm').onsubmit = async (e) => {
+            e.preventDefault();
+            let privacy = document.getElementById('regPrivacy').checked;
+            if(!privacy) { notyf.error('Необходимо согласие на обработку персональных данных'); return; }
+            let form = new URLSearchParams({ email:e.target.regEmail.value, full_name:e.target.regName.value, password:e.target.regPassword.value, privacy_accepted:privacy });
+            await fetch('/api/register', { method:'POST', body:form });
+            notyf.success('Регистрация успешна, теперь войдите');
+        };
     }
 
+    // ------------------------------------------------------------
+    // Ролевой интерфейс с принудительной перерисовкой вкладок
+    // ------------------------------------------------------------
     async function renderUI() {
         if(!currentUser) return;
         let tabs = [];
@@ -804,168 +914,389 @@ def index():
             { id: 'knowledge', label: 'База знаний', render: renderKnowledge },
             { id: 'exportData', label: 'Экспорт', render: renderExport }
         ];
-        currentTabs = tabs;
-        tabIdToIndex = {};
-        tabs.forEach((tab, idx) => { tabIdToIndex[tab.id] = idx; });
-        let tabsHtml = `<div class="flex gap-2 mb-4 border-b pb-2 flex-wrap">` + tabs.map(t => `<button class="tab-btn" data-tab-id="${t.id}">${t.label}</button>`).join('') + `</div><div id="panes"></div>`;
+
+        let tabsHtml = `<div class="flex gap-2 mb-4 border-b pb-2 flex-wrap">${tabs.map((t,i)=>`<button class="tab-btn ${i===0?'active':''}" data-tab="${i}">${escapeHtml(t.label)}</button>`).join('')}</div><div id="panes"></div>`;
         document.getElementById('app').innerHTML = tabsHtml;
         let panesDiv = document.getElementById('panes');
-        for(let i=0; i<tabs.length; i++) { let pane = document.createElement('div'); pane.className = 'tab-pane'; pane.id = `pane-${i}`; panesDiv.appendChild(pane); }
-        async function switchToTabById(tabId) {
-            let idx = tabIdToIndex[tabId]; if(idx === undefined) return false;
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            let targetBtn = document.querySelector(`.tab-btn[data-tab-id="${tabId}"]`); if(targetBtn) targetBtn.classList.add('active');
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-            let activePane = document.getElementById(`pane-${idx}`);
-            if(activePane) { activePane.classList.add('active'); if(activePane.innerHTML === '') await tabs[idx].render(activePane); }
-            return true;
+
+        for(let i=0; i<tabs.length; i++) {
+            let pane = document.createElement('div');
+            pane.className = `tab-pane ${i===0?'active':''}`;
+            pane.id = `pane-${i}`;
+            panesDiv.appendChild(pane);
         }
-        async function handleHashChange() {
-            if(isUpdatingHash) return;
-            let hash = window.location.hash.substring(1);
-            if(hash === '') { hash = tabs[0].id; isUpdatingHash = true; window.location.hash = hash; isUpdatingHash = false; }
-            await switchToTabById(hash);
+
+        async function loadPane(index) {
+            let pane = document.getElementById(`pane-${index}`);
+            if (!pane) return;
+            let tab = tabs[index];
+            if (!tab) return;
+            pane.innerHTML = '';
+            await tab.render(pane);
         }
-        document.querySelectorAll('.tab-btn').forEach(btn => { btn.onclick = async (e) => { let tabId = btn.getAttribute('data-tab-id'); if(tabId && window.location.hash !== '#'+tabId) { isUpdatingHash = true; window.location.hash = tabId; isUpdatingHash = false; await switchToTabById(tabId); } }; });
-        window.addEventListener('hashchange', handleHashChange);
-        await handleHashChange();
+
+        await loadPane(0);
+        document.querySelectorAll('.tab-btn').forEach((btn, idx) => {
+            btn.onclick = async () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                document.getElementById(`pane-${idx}`).classList.add('active');
+                await loadPane(idx);
+            };
+        });
     }
 
-    // ========== Рендеры (полные версии) ==========
+    // ---------------------- Рендеры для всех ролей ----------------------
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ</th><th>Действие</th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Оценка</th><th>Ответ</th><th>Действие</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actionBtn = '';
-            if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html += `<tr><td>${t.id}<td>${escapeHtml(t.title)}<td><span class="status-badge status-${t.status}">${t.status}</span><td>${t.priority}<td>${new Date(t.created_at).toLocaleDateString()}<td>${t.satisfaction?'⭐'+t.satisfaction:'—'}<td>${escapeHtml(t.review||'—')}<td><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</tr>`;
+            if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="openDetailedReview(${t.id})">Оценить</button>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Статус"><span class="status-badge status-${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></td><td data-label="Приоритет">${escapeHtml(t.priority)}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${escapeHtml(t.review||'—')}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</tr>`;
         }
-        html += '</tbody></table></div>';
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
+        
         window.viewTicket = async (id) => {
-            let ticketsData = await api('/api/tickets'); let ticket = ticketsData.tickets.find(t => t.id === id); if(!ticket) return;
+            let ticketsData = await api('/api/tickets');
+            let ticket = ticketsData.tickets.find(t => t.id === id);
+            if (!ticket) return;
             let comments = await api(`/api/tickets/${id}/comments`);
-            let modalHtml = `<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c => `<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea><div class="flex justify-end gap-2"><button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button><button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button></div></div></div>`;
+            let modalHtml = `
+                <div id="ticketModal" class="ticket-modal">
+                    <div class="ticket-modal-content">
+                        <h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2>
+                        <div class="space-y-2 mb-4">
+                            <div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div>
+                            <div><strong>Описание:</strong> ${escapeHtml(ticket.description || '—')}</div>
+                            <div><strong>Статус:</strong> <span class="status-badge status-${escapeHtml(ticket.status)}">${escapeHtml(ticket.status)}</span></div>
+                            <div><strong>Приоритет:</strong> ${escapeHtml(ticket.priority)}</div>
+                            <div><strong>Категория:</strong> ${escapeHtml(ticket.category || '—')}</div>
+                            <div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div>
+                        </div>
+                        <hr class="my-2">
+                        <h3 class="font-semibold mb-2">Комментарии</h3>
+                        <div id="commentsList" class="comments-list">
+                            ${comments.map(c => `<div class="comment-item"><span class="font-semibold">${escapeHtml(c.user_name)}</span> <span class="text-xs text-gray-500">${new Date(c.created_at).toLocaleString()}</span><div class="mt-1">${escapeHtml(c.comment)}</div></div>`).join('')}
+                        </div>
+                        <textarea id="newComment" rows="2" class="w-full border rounded-lg p-2 mb-2" placeholder="Напишите комментарий..."></textarea>
+                        <div class="flex justify-end gap-2">
+                            <button class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600" onclick="closeModal()">Закрыть</button>
+                            <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700" onclick="addComment(${id})">Отправить</button>
+                        </div>
+                    </div>
+                </div>
+            `;
             document.body.insertAdjacentHTML('beforeend', modalHtml);
             window.closeModal = () => document.getElementById('ticketModal')?.remove();
-            window.addComment = async (id) => { let txt = document.getElementById('newComment')?.value.trim(); if(!txt) { notyf.error('Введите текст'); return; } let form = new URLSearchParams({ comment: txt }); await api(`/api/tickets/${id}/comments`,'POST',form); notyf.success('Комментарий отправлен'); closeModal(); renderUI(); };
+            window.addComment = async (id) => {
+                let commentText = document.getElementById('newComment')?.value.trim();
+                if (!commentText) { notyf.error('Введите текст'); return; }
+                let form = new URLSearchParams({ comment: commentText });
+                await api(`/api/tickets/${id}/comments`, 'POST', form);
+                notyf.success('Комментарий отправлен');
+                closeModal();
+                renderUI();
+            };
         };
+        
         window.openDetailedReview = async (id) => {
-            let modal = document.createElement('div'); modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50';
-            modal.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md"><h3 class="text-xl font-bold mb-4">Оцените качество</h3><div class="space-y-4"><div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div><div><label>Скорость</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div><div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div><div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div><div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div><div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded" onclick="this.closest('.fixed').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded" onclick="submitReview(${id})">Отправить</button></div></div></div>`;
+            const modal = document.createElement('div'); modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md">
+                    <h3 class="text-xl font-bold mb-4">Оцените качество</h3>
+                    <div class="space-y-4">
+                        <div><label>Общая (1-5)</label><div class="flex gap-1 stars" data-crit="overall">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="overallVal"></div>
+                        <div><label>Скорость ответа</label><div class="flex gap-1 stars" data-crit="speed">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="speedVal"></div>
+                        <div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div>
+                        <div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div>
+                        <div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div>
+                        <div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600" onclick="this.closest('.fixed').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700" onclick="submitReview(${id})">Отправить</button></div>
+                    </div>
+                </div>
+            `;
             document.body.appendChild(modal);
-            modal.querySelectorAll('.stars').forEach(group => { let crit = group.dataset.crit; group.querySelectorAll('.star').forEach(star => { star.onclick = () => { group.querySelectorAll('.star').forEach(s=>s.style.color=''); star.style.color='#facc15'; document.getElementById(`${crit}Val`).value = star.dataset.val; }; }); });
-            window.submitReview = async (id) => { let overall = document.getElementById('overallVal')?.value, speed = document.getElementById('speedVal')?.value, prof = document.getElementById('profVal')?.value, politeness = document.getElementById('politenessVal')?.value, comment = document.getElementById('reviewComment')?.value||''; if(!overall||!speed||!prof||!politeness) { notyf.error('Заполните все оценки'); return; } let form = new URLSearchParams({ overall, speed, professionalism:prof, politeness, comment }); await api(`/api/tickets/${id}/detailed_review`,'POST',form); notyf.success('Спасибо за отзыв!'); modal.remove(); renderUI(); };
+            modal.querySelectorAll('.stars').forEach(group => {
+                let crit = group.dataset.crit;
+                group.querySelectorAll('.star').forEach(star => {
+                    star.onclick = () => {
+                        group.querySelectorAll('.star').forEach(s=>s.style.color='');
+                        star.style.color='#facc15';
+                        document.getElementById(`${crit}Val`).value = star.dataset.val;
+                    };
+                });
+            });
+            window.submitReview = async (id) => {
+                let overall = document.getElementById('overallVal')?.value;
+                let speed = document.getElementById('speedVal')?.value;
+                let prof = document.getElementById('profVal')?.value;
+                let politeness = document.getElementById('politenessVal')?.value;
+                let comment = document.getElementById('reviewComment')?.value || '';
+                if(!overall || !speed || !prof || !politeness) { notyf.error('Заполните все оценки'); return; }
+                let form = new URLSearchParams({ overall, speed, professionalism:prof, politeness, comment });
+                await api(`/api/tickets/${id}/detailed_review`, 'POST', form);
+                notyf.success('Спасибо за отзыв!');
+                modal.remove();
+                renderUI();
+            };
         };
     }
+
     function renderNewTicket(container) {
-        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3><form id="newForm"><div><label>Название</label><input id="title" required></div><div><label>Описание</label><textarea id="desc" rows="3"></textarea></div><div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div><div><label>Категория</label><select id="category"></select></div><div class="flex items-center gap-2"><input type="checkbox" id="privacyConsent" required><label>Я согласен с <a href="/privacy" target="_blank" class="text-blue-600">политикой</a></label></div><button type="submit" class="btn-primary mt-2">Создать</button></form></div>`;
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Новая заявка</h3>
+        <form id="newForm" class="space-y-4">
+            <div><label>Название</label><input id="title" required></div>
+            <div><label>Описание</label><textarea id="desc" rows="3"></textarea></div>
+            <div><label>Приоритет</label><select id="priority"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div>
+            <div><label>Категория</label><select id="category"></select></div>
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="privacyConsent" required>
+                <label class="text-sm">Я согласен с <a href="/privacy" target="_blank" class="text-blue-600 hover:underline">политикой обработки персональных данных</a></label>
+            </div>
+            <button type="submit" class="btn-primary">Создать</button>
+        </form></div>`;
         fetch('/api/categories').then(r=>r.json()).then(cats=>{ let sel=document.getElementById('category'); cats.forEach(c=>{ let opt=document.createElement('option'); opt.value=c.name; opt.innerText=c.name; sel.appendChild(opt); }); });
-        document.getElementById('newForm').onsubmit = async (e) => { e.preventDefault(); let privacy = document.getElementById('privacyConsent').checked; if(!privacy) { notyf.error('Необходимо согласие'); return; } let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value, category:document.getElementById('category').value, privacy_accepted:privacy }); await api('/api/tickets','POST',body); notyf.success('Заявка создана'); renderUI(); };
+        document.getElementById('newForm').onsubmit = async (e) => {
+            e.preventDefault();
+            let privacy = document.getElementById('privacyConsent').checked;
+            if(!privacy) { notyf.error('Необходимо согласие на обработку персональных данных'); return; }
+            let body = new URLSearchParams({ title:document.getElementById('title').value, description:document.getElementById('desc').value, priority:document.getElementById('priority').value, category:document.getElementById('category').value, privacy_accepted:privacy });
+            await api('/api/tickets','POST',body);
+            notyf.success('Заявка создана');
+            renderUI();
+        };
     }
+
+    // ИСПРАВЛЕННАЯ функция renderKnowledge с локальным поиском и улучшенной читаемостью
     async function renderKnowledge(container) {
+        // Загружаем все статьи
         let articles = await api('/api/knowledge');
-        let wrapper = document.createElement('div'); wrapper.className = 'card'; wrapper.innerHTML = `<h3 class="knowledge-title">📚 База знаний</h3><input type="text" id="kbSearchInput" class="knowledge-search w-full" placeholder="Поиск..."><div id="articlesList"></div>`;
+        // Создаём структуру
+        const wrapper = document.createElement('div');
+        wrapper.className = 'card';
+        wrapper.innerHTML = `
+            <h3 class="knowledge-title">📚 База знаний</h3>
+            <input type="text" id="kbSearchInput" class="knowledge-search w-full" placeholder="Поиск...">
+            <div id="articlesList"></div>
+        `;
         container.appendChild(wrapper);
-        let searchInput = wrapper.querySelector('#kbSearchInput'), articlesDiv = wrapper.querySelector('#articlesList');
-        function render(a) { if(a.length===0) { articlesDiv.innerHTML='<div class="text-center text-gray-500 py-4">Статей не найдено</div>'; return; } articlesDiv.innerHTML = a.map(art => `<div class="article-card"><div class="article-title">${escapeHtml(art.title)}</div><div class="article-content">${escapeHtml(art.content)}</div></div>`).join(''); }
-        render(articles);
-        searchInput.addEventListener('input', async (e) => { let q = e.target.value.trim(); if(q==='') render(articles); else { let resp = await api(`/api/knowledge?search=${encodeURIComponent(q)}`); render(resp); } });
+        
+        const searchInput = wrapper.querySelector('#kbSearchInput');
+        const articlesDiv = wrapper.querySelector('#articlesList');
+        
+        function renderArticles(articlesArray) {
+            if (articlesArray.length === 0) {
+                articlesDiv.innerHTML = '<div class="text-center text-gray-500 py-4">Статей не найдено</div>';
+                return;
+            }
+            articlesDiv.innerHTML = articlesArray.map(a => `
+                <div class="article-card">
+                    <div class="article-title">${escapeHtml(a.title)}</div>
+                    <div class="article-content">${escapeHtml(a.content)}</div>
+                </div>
+            `).join('');
+        }
+        
+        renderArticles(articles);
+        
+        searchInput.addEventListener('input', async (e) => {
+            const query = e.target.value.trim();
+            let filtered;
+            if (query === '') {
+                filtered = articles;
+            } else {
+                const response = await api(`/api/knowledge?search=${encodeURIComponent(query)}`);
+                filtered = response;
+            }
+            renderArticles(filtered);
+        });
     }
+
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Дата и время</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
-            if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
-            else if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="respond(${t.id})">Ответить</button>`;
-            else if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
-            html += `<tr><td>${t.id}<td>${escapeHtml(t.title)}<td>${escapeHtml(t.description||'—')}<td><span class="status-badge status-${t.status}">${t.status}</span><td>${t.priority}<td><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</tr>`;
+            if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm hover:bg-yellow-600" onclick="assign(${t.id})">Принять</button>`;
+            if(t.status === 'in_progress') actions = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="resolve(${t.id})">Решить</button> <button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="respond(${t.id})">Ответить</button>`;
+            if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="closeTicket(${t.id})">Закрыть</button>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${escapeHtml(t.title)}</td><td data-label="Описание">${escapeHtml(t.description||'—')}</td><td data-label="Статус"><span class="status-badge status-${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></td><td data-label="Приоритет">${escapeHtml(t.priority)}</td><td data-label="Дата и время">${new Date(t.created_at).toLocaleString()}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
         }
-        html += '</tbody></table></div>';
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
-        window.resolve = async (id) => { let rev = prompt("Комментарий к решению:"); if(rev!==null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
+        window.resolve = async (id) => { let rev = prompt("Комментарий к решению (будет виден клиенту):"); if(rev !== null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
         window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`,'PUT'); renderUI(); };
         window.respond = async (id) => { let msg = prompt("Ответ клиенту:"); if(msg) { await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`,'PUT'); renderUI(); } };
-        window.viewTicket = async (id) => { let ticketsData = await api('/api/tickets'); let ticket = ticketsData.tickets.find(t => t.id === id); if(!ticket) return; let comments = await api(`/api/tickets/${id}/comments`);
-        let modalHtml = `<div id="ticketModal" class="ticket-modal"><div class="ticket-modal-content"><h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2><div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div><div><strong>Описание:</strong> ${escapeHtml(ticket.description||'—')}</div><div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div><div><strong>Приоритет:</strong> ${ticket.priority}</div><div><strong>Категория:</strong> ${escapeHtml(ticket.category||'—')}</div><div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div><hr><h3>Комментарии</h3><div id="commentsList">${comments.map(c => `<div class="comment-item"><b>${escapeHtml(c.user_name)}</b> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}</div><textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea><div class="flex justify-end gap-2"><button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button><button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button></div></div></div>`;
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-        window.closeModal = () => document.getElementById('ticketModal')?.remove();
-        window.addComment = async (id) => { let txt = document.getElementById('newComment')?.value.trim(); if(!txt) { notyf.error('Введите текст'); return; } let form = new URLSearchParams({ comment: txt }); await api(`/api/tickets/${id}/comments`,'POST',form); notyf.success('Комментарий отправлен'); closeModal(); renderUI(); };
+        window.viewTicket = async (id) => {
+            let ticketsData = await api('/api/tickets');
+            let ticket = ticketsData.tickets.find(t => t.id === id);
+            if (!ticket) return;
+            let comments = await api(`/api/tickets/${id}/comments`);
+            let modalHtml = `
+                <div id="ticketModal" class="ticket-modal">
+                    <div class="ticket-modal-content">
+                        <h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2>
+                        <div class="space-y-2 mb-4">
+                            <div><strong>Название:</strong> ${escapeHtml(ticket.title)}</div>
+                            <div><strong>Описание:</strong> ${escapeHtml(ticket.description || '—')}</div>
+                            <div><strong>Статус:</strong> <span class="status-badge status-${escapeHtml(ticket.status)}">${escapeHtml(ticket.status)}</span></div>
+                            <div><strong>Приоритет:</strong> ${escapeHtml(ticket.priority)}</div>
+                            <div><strong>Категория:</strong> ${escapeHtml(ticket.category || '—')}</div>
+                            <div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div>
+                        </div>
+                        <hr class="my-2">
+                        <h3 class="font-semibold mb-2">Комментарии</h3>
+                        <div id="commentsList" class="comments-list">
+                            ${comments.map(c => `<div class="comment-item"><span class="font-semibold">${escapeHtml(c.user_name)}</span> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${escapeHtml(c.comment)}</div></div>`).join('')}
+                        </div>
+                        <textarea id="newComment" rows="2" class="w-full border rounded-lg p-2 mb-2" placeholder="Напишите комментарий..."></textarea>
+                        <div class="flex justify-end gap-2">
+                            <button class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600" onclick="closeModal()">Закрыть</button>
+                            <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700" onclick="addComment(${id})">Отправить</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            window.closeModal = () => document.getElementById('ticketModal')?.remove();
+            window.addComment = async (id) => {
+                let commentText = document.getElementById('newComment')?.value.trim();
+                if (!commentText) { notyf.error('Введите текст'); return; }
+                let form = new URLSearchParams({ comment: commentText });
+                await api(`/api/tickets/${id}/comments`, 'POST', form);
+                notyf.success('Комментарий отправлен');
+                closeModal();
+                renderUI();
+            };
         };
     }
-    function renderExport(container) { container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`; }
+
+    function renderExport(container) {
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Экспорт</h3><a href="/api/export/tickets" target="_blank"><button class="btn-primary">Скачать CSV</button></a></div>`;
+    }
+
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
         let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td>${u.id}<td>${escapeHtml(u.email)}<td>${escapeHtml(u.full_name)}<td>${u.role}<td><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select><td><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></tr>`;
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${escapeHtml(u.email)}</td><td data-label="ФИО">${escapeHtml(u.full_name)}</td><td data-label="Роль">${escapeHtml(u.role)}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
-        html += '</tbody></table></div>';
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
-        window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await api(`/api/users/${id}`,'DELETE'); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
+        window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await api(`/api/users/${id}`, 'DELETE'); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
     }
+
     async function renderAdminSLA(container) {
         let sla = await api('/api/admin/sla');
-        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Настройки SLA</h3><div><label>Время ответа High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}"></div><div><label>Время ответа Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}"></div><button class="btn-primary" id="saveSla">Сохранить</button></div>`;
-        document.getElementById('saveSla').onclick = async () => { await api(`/api/admin/sla?response_high_hours=${document.getElementById('high').value}&response_medium_hours=${document.getElementById('medium').value}`,'PUT'); notyf.success('Настройки сохранены'); };
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Настройки SLA</h3>
+        <div class="space-y-4"><div><label>Время ответа для High/Critical (часы)</label><input type="number" id="high" value="${sla.response_high_hours}"></div>
+        <div><label>Время ответа для Medium/Low (часы)</label><input type="number" id="medium" value="${sla.response_medium_hours}"></div>
+        <button class="btn-primary" id="saveSla">Сохранить</button></div></div>`;
+        document.getElementById('saveSla').onclick = async () => { await api(`/api/admin/sla?response_high_hours=${document.getElementById('high').value}&response_medium_hours=${document.getElementById('medium').value}`, 'PUT'); notyf.success('Настройки сохранены'); };
     }
+
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
-        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>${logs.map(l => `<tr><td>${new Date(l.time).toLocaleString()}<td>${l.user_id}<td>${l.action}<td>${escapeHtml(l.details||'')}</tr>`).join('')}</tbody></table></div>`;
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
+        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${escapeHtml(l.action)}</td><td data-label="Детали">${escapeHtml(l.details||'')}</td></tr>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
+
     async function renderDashboard(container) {
         let m = await api('/api/dashboard/metrics');
-        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">📊 Дашборд качества</h3><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8"><div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl"><div class="text-sm">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div><div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl"><div class="text-sm">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div><div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl"><div class="text-sm">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div><div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-4 rounded-xl"><div class="text-sm">Соблюдение SLA</div><div class="text-3xl font-bold">${m.sla_compliance}%</div></div><div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl"><div class="text-sm">Ср. время решения</div><div class="text-3xl font-bold">${m.avg_resolution_minutes} <span class="text-lg">мин</span></div></div></div><div class="grid lg:grid-cols-2 gap-6"><div class="chart-container"><canvas id="statusChartDash" height="200"></canvas></div><div class="chart-container"><canvas id="trendChartDash" height="200"></canvas></div></div><div class="text-xs text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div></div>`;
-        const colors = { new:'#facc15', in_progress:'#3b82f6', resolved:'#22c55e', closed:'#64748b' };
-        let statusLabels = Object.keys(m.status_counts), statusData = Object.values(m.status_counts);
-        let statusConfig = { labels: statusLabels.map(s=>({new:'Новые', in_progress:'В работе', resolved:'Решённые', closed:'Закрытые'}[s]||s)), datasets: [{ data: statusData, backgroundColor: statusLabels.map(s=>colors[s]||'#94a3b8') }] };
-        let trendConfig = { labels: m.daily_labels, datasets: [{ label:'Заявки', data:m.daily_data, borderColor:'#3b82f6', fill: true, backgroundColor:'#3b82f620' }] };
-        const textColor = theme === 'dark' ? '#e2e8f0' : '#1e293b';
-        if(window.statusChart) window.statusChart.destroy();
-        if(window.trendChart) window.trendChart.destroy();
-        window.statusChartData = statusConfig; window.trendChartData = trendConfig;
-        window.statusChart = new Chart(document.getElementById('statusChartDash'), { type:'pie', data:statusConfig, options:{ responsive:true, plugins:{ legend:{ labels:{ color:textColor } } } } });
-        window.trendChart = new Chart(document.getElementById('trendChartDash'), { type:'line', data:trendConfig, options:{ responsive:true, plugins:{ legend:{ labels:{ color:textColor } } }, scales:{ x:{ ticks:{ color:textColor } }, y:{ ticks:{ color:textColor } } } } });
+        const statusLabels = Object.keys(m.status_counts);
+        const statusData = Object.values(m.status_counts);
+        const dailyLabels = m.daily_labels;
+        const dailyData = m.daily_data;
+        const slaComp = m.sla_compliance;
+        const avgRes = m.avg_resolution_minutes;
+        container.innerHTML = `
+            <div class="card">
+                <h3 class="text-xl font-semibold mb-4">📊 Дашборд качества</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+                    <div class="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Всего заявок</div><div class="text-3xl font-bold">${m.total_tickets}</div></div>
+                    <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Решено/закрыто</div><div class="text-3xl font-bold">${m.resolved_tickets}</div><div class="text-xs mt-1">${((m.resolved_tickets/m.total_tickets)*100).toFixed(1)}%</div></div>
+                    <div class="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Средний CSAT</div><div class="text-3xl font-bold">${m.avg_csat}/5</div></div>
+                    <div class="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Соблюдение SLA</div><div class="text-3xl font-bold">${slaComp}%</div></div>
+                    <div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Ср. время решения</div><div class="text-3xl font-bold">${avgRes}<span class="text-lg"> мин</span></div></div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="statusChartDash" height="200"></canvas></div>
+                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="trendChartDash" height="200"></canvas></div>
+                </div>
+                <div class="text-xs text-gray-500 text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div>
+            </div>
+        `;
+        const colors = { 'new':'#facc15','in_progress':'#3b82f6','resolved':'#22c55e','closed':'#64748b'};
+        new Chart(document.getElementById('statusChartDash'), { type:'pie', data:{ labels:statusLabels.map(s=>({new:'Новые',in_progress:'В работе',resolved:'Решённые',closed:'Закрытые'}[s]||s)), datasets:[{ data:statusData, backgroundColor:statusLabels.map(s=>colors[s]||'#94a3b8') }] }, options:{ responsive:true } });
+        new Chart(document.getElementById('trendChartDash'), { type:'line', data:{ labels:dailyLabels, datasets:[{ label:'Заявки', data:dailyData, borderColor:'#3b82f6', fill:true }] }, options:{ responsive:true } });
     }
+
     async function renderAdvancedDashboard(container) {
-        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3><div class="flex flex-wrap gap-4 mb-6"><div><label>Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div><div><label>Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div><div><label>Категория</label><select id="categoryFilter"><option value="">Все</option></select></div><button class="btn-primary" id="applyFilters">Применить</button></div><div class="grid md:grid-cols-4 gap-4 mb-6"><div class="metric-card"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div><div class="metric-card"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div></div><div class="mb-6 chart-container"><canvas id="operatorChart" height="300"></canvas></div><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div></div>`;
-        let users = await api('/api/users'), cats = await api('/api/categories');
-        let opSelect = document.getElementById('operatorFilter'); opSelect.innerHTML = '<option value="">Все</option>' + users.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}">${escapeHtml(u.full_name)}</option>`).join('');
-        let catSelect = document.getElementById('categoryFilter'); catSelect.innerHTML = '<option value="">Все</option>' + cats.map(c=>`<option value="${c.name}">${escapeHtml(c.name)}</option>`).join('');
+        container.innerHTML = `<div class="card"><h3 class="text-xl font-semibold mb-4">Аналитика оценок</h3>
+        <div class="flex flex-wrap gap-4 mb-6">
+            <div><label class="block text-sm">Период</label><select id="periodFilter"><option value="month">Месяц</option><option value="week">Неделя</option><option value="quarter">Квартал</option></select></div>
+            <div><label class="block text-sm">Оператор</label><select id="operatorFilter"><option value="">Все</option></select></div>
+            <div><label class="block text-sm">Категория</label><select id="categoryFilter"><option value="">Все</option></select></div>
+            <button class="btn-primary" id="applyFilters">Применить</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Общая оценка</div><div id="overallAvg" class="text-2xl font-bold">-</div></div>
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Скорость ответа</div><div id="speedAvg" class="text-2xl font-bold">-</div></div>
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div>
+            <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div>
+        </div>
+        <div class="mb-6"><canvas id="operatorChart" height="300"></canvas></div>
+        <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div>
+        </div>`;
+        const users = await api('/api/users');
+        const cats = await api('/api/categories');
+        let opSelect = document.getElementById('operatorFilter');
+        opSelect.innerHTML = '<option value="">Все</option>' + users.filter(u=>u.role==='operator').map(u=>`<option value="${u.id}">${escapeHtml(u.full_name)}</option>`).join('');
+        let catSelect = document.getElementById('categoryFilter');
+        catSelect.innerHTML = '<option value="">Все</option>' + cats.map(c=>`<option value="${c.name}">${escapeHtml(c.name)}</option>`).join('');
         const loadData = async () => {
-            let period = document.getElementById('periodFilter').value, op_id = document.getElementById('operatorFilter').value, cat = document.getElementById('categoryFilter').value;
-            let params = new URLSearchParams({ period }); if(op_id) params.append('operator_id', op_id); if(cat) params.append('category', cat);
+            let period = document.getElementById('periodFilter').value;
+            let op_id = document.getElementById('operatorFilter').value;
+            let cat = document.getElementById('categoryFilter').value;
+            let params = new URLSearchParams({ period });
+            if(op_id) params.append('operator_id', op_id);
+            if(cat) params.append('category', cat);
             let data = await api(`/api/dashboard/advanced_metrics?${params}`);
-            document.getElementById('overallAvg').innerText = data.overall_avg; document.getElementById('speedAvg').innerText = data.speed_avg;
-            document.getElementById('profAvg').innerText = data.prof_avg; document.getElementById('politenessAvg').innerText = data.politeness_avg;
-            let tableHtml = '', opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
+            document.getElementById('overallAvg').innerText = data.overall_avg;
+            document.getElementById('speedAvg').innerText = data.speed_avg;
+            document.getElementById('profAvg').innerText = data.prof_avg;
+            document.getElementById('politenessAvg').innerText = data.politeness_avg;
+            let tableHtml = '';
+            const opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
             for(let op of data.operator_stats) {
-                let badge = op.overall_avg>=4.5 ? 'bg-green-100 text-green-800' : (op.overall_avg>=3 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');
-                tableHtml += `<tr><td class="font-medium">${escapeHtml(op.name)}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</tr>`;
+                let badge = op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
+                tableHtml += `<tr><td class="font-medium">${escapeHtml(op.name)}</td><td class="text-center">${op.count}</td><td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span></td><td class="text-center">${op.speed_avg}</td><td class="text-center">${op.prof_avg}</td><td class="text-center">${op.politeness_avg}</td></tr>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
-            let ctx = document.getElementById('operatorChart').getContext('2d');
+            const ctx = document.getElementById('operatorChart').getContext('2d');
             if(window.opChart) window.opChart.destroy();
             let labels = data.operator_stats.map(o=>o.name);
             let overalls = data.operator_stats.map(o=>o.overall_avg);
-            let chartData = { labels: labels, datasets: [{ label:'Общая оценка', data: overalls, backgroundColor: labels.map((_,i)=>opColors[i%opColors.length]) }] };
-            window.opChartData = chartData;
-            const textColor = theme === 'dark' ? '#e2e8f0' : '#1e293b';
-            window.opChart = new Chart(ctx, { type:'bar', data: chartData, options:{ responsive:true, plugins:{ legend:{ labels:{ color:textColor } } }, scales:{ x:{ ticks:{ color:textColor } }, y:{ ticks:{ color:textColor } } } } });
+            window.opChart = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label:'Общая оценка', data:overalls, backgroundColor:labels.map((_,i)=>opColors[i%opColors.length]) }] } });
         };
         document.getElementById('applyFilters').addEventListener('click', loadData);
         loadData();
     }
+
     loadUser();
 </script>
 </body>
-</html>"""))
+</html>
+    """)
 
 if __name__ == "__main__":
+    import os
     port = int(os.environ.get("PORT", 8080))
-    print(f"\n🚀 Сервер Quality Monitor Pro запущен на порту {port}", file=sys.stderr)
+    print(f"\n🚀 Сервер Оптимасеть запущен на порту {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
