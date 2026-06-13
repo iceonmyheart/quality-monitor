@@ -8,16 +8,22 @@ import sqlite3
 import secrets
 import csv
 import io
+import os
 
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # ------------------------------------------------------------
+# Путь к базе данных (в папке с приложением)
+# ------------------------------------------------------------
+DB_PATH = os.path.join(os.path.dirname(__file__), "monitoring.db")
+
+# ------------------------------------------------------------
 # Инициализация базы данных (с тестовыми заявками)
 # ------------------------------------------------------------
 def init_db():
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     # Таблицы
     c.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -179,7 +185,7 @@ def register(email: str = Form(...), full_name: str = Form(...), password: str =
         role = "quality"
     else:
         role = "client"
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     try:
         c.execute("INSERT INTO users (email, full_name, hashed_password, role, created_at) VALUES (?,?,?,?,?)",
@@ -193,7 +199,7 @@ def register(email: str = Form(...), full_name: str = Form(...), password: str =
 
 @app.post("/api/login")
 def login(email: str = Form(...), password: str = Form(...), response: Response = None):
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, full_name, role, hashed_password FROM users WHERE email=?", (email,))
     user = c.fetchone()
@@ -223,7 +229,7 @@ def get_tickets(session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     if user["role"] == "client":
         c.execute("SELECT id, title, description, status, priority, category, created_at, satisfaction, review FROM tickets WHERE created_by_id=?", (user["id"],))
@@ -243,7 +249,7 @@ def create_ticket(title: str = Form(...), description: str = Form(...), priority
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) VALUES (?,?,?,?,?,?,?)",
               (title, description, "new", priority, category, datetime.now().isoformat(), user["id"]))
@@ -257,7 +263,7 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     updates = []
     params = []
@@ -318,7 +324,7 @@ def add_comment(ticket_id: int, comment: str = Form(...), session: str = Cookie(
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT created_by_id, assigned_to_id FROM tickets WHERE id=?", (ticket_id,))
     row = c.fetchone()
@@ -340,7 +346,7 @@ def get_comments(ticket_id: int, session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
     user = sessions[session]
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT created_by_id, assigned_to_id FROM tickets WHERE id=?", (ticket_id,))
     row = c.fetchone()
@@ -366,7 +372,7 @@ def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = F
                         comment: str = Form(""), session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT INTO detailed_reviews (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at) VALUES (?,?,?,?,?,?,?)",
               (ticket_id, overall, speed, professionalism, politeness, comment, datetime.now().isoformat()))
@@ -378,7 +384,7 @@ def add_detailed_review(ticket_id: int, overall: int = Form(...), speed: int = F
 def advanced_metrics(period: str = "month", operator_id: int = None, category: str = None, session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
         raise HTTPException(403)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     now = datetime.now()
     if period == "week":
@@ -442,7 +448,7 @@ def advanced_metrics(period: str = "month", operator_id: int = None, category: s
 def dashboard_metrics(session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
         raise HTTPException(403)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM tickets")
     total = c.fetchone()[0]
@@ -482,7 +488,7 @@ def dashboard_metrics(session: str = Cookie(None)):
 def get_users(session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] not in ["admin", "quality"]:
         raise HTTPException(403)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, email, full_name, role FROM users")
     users = [{"id": row[0], "email": row[1], "full_name": row[2], "role": row[3]} for row in c.fetchall()]
@@ -493,7 +499,7 @@ def get_users(session: str = Cookie(None)):
 def change_role(user_id: int, new_role: str, session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
         raise HTTPException(403)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE users SET role=? WHERE id=?", (new_role, user_id))
     conn.commit()
@@ -507,7 +513,7 @@ def delete_user(user_id: int, session: str = Cookie(None)):
     current_admin_id = sessions[session]["id"]
     if user_id == current_admin_id:
         raise HTTPException(400, "Нельзя удалить свою учётную запись")
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id FROM users WHERE id=?", (user_id,))
     if not c.fetchone():
@@ -522,7 +528,7 @@ def delete_user(user_id: int, session: str = Cookie(None)):
 def admin_logs(session: str = Cookie(None), limit: int = 100):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
         raise HTTPException(403)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT event_time, user_id, action, details FROM system_logs ORDER BY event_time DESC LIMIT ?", (limit,))
     logs = [{"time": row[0], "user_id": row[1], "action": row[2], "details": row[3]} for row in c.fetchall()]
@@ -533,7 +539,7 @@ def admin_logs(session: str = Cookie(None), limit: int = 100):
 def admin_get_sla(session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
         raise HTTPException(403)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT param_key, param_value FROM sla_settings")
     rows = dict(c.fetchall())
@@ -544,7 +550,7 @@ def admin_get_sla(session: str = Cookie(None)):
 def admin_update_sla(response_high_hours: int, response_medium_hours: int, session: str = Cookie(None)):
     if not session or session not in sessions or sessions[session]["role"] != "admin":
         raise HTTPException(403)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE sla_settings SET param_value=? WHERE param_key=?", (response_high_hours, "response_high_hours"))
     c.execute("UPDATE sla_settings SET param_value=? WHERE param_key=?", (response_medium_hours, "response_medium_hours"))
@@ -554,7 +560,7 @@ def admin_update_sla(response_high_hours: int, response_medium_hours: int, sessi
 
 @app.get("/api/knowledge")
 def get_knowledge(search: str = ""):
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     if search:
         c.execute("SELECT id, title, content, category_id FROM knowledge_articles WHERE title LIKE ? OR content LIKE ?", (f"%{search}%", f"%{search}%"))
@@ -566,7 +572,7 @@ def get_knowledge(search: str = ""):
 
 @app.get("/api/categories")
 def get_categories():
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, name FROM categories")
     cats = [{"id": row[0], "name": row[1]} for row in c.fetchall()]
@@ -577,7 +583,7 @@ def get_categories():
 def export_tickets(session: str = Cookie(None)):
     if not session or session not in sessions:
         raise HTTPException(401)
-    conn = sqlite3.connect("monitoring.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, title, description, status, priority, created_at, satisfaction, review FROM tickets")
     rows = c.fetchall()
@@ -679,7 +685,7 @@ def index():
         .bg-red-600:hover { background: #b91c1c !important; transform: scale(1.02); }
         .bg-yellow-500:hover { background: #ca8a04 !important; transform: scale(1.02); }
         
-        /* ---------- Улучшенная читаемость для вкладки "База знаний" ---------- */
+        /* Улучшенная читаемость для вкладки "База знаний" */
         .knowledge-title {
             font-size: 1.75rem !important;
             font-weight: 700 !important;
@@ -867,9 +873,6 @@ def index():
         };
     }
 
-    // ------------------------------------------------------------
-    // Ролевой интерфейс
-    // ------------------------------------------------------------
     async function renderUI() {
         if(!currentUser) return;
         let tabs = [];
@@ -930,7 +933,6 @@ def index():
         });
     }
 
-    // ---------------------- Рендеры ----------------------
     async function renderClientTickets(container) {
         let data = await api('/api/tickets');
         let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Статус</th><th>Приоритет</th><th>Дата</th><th>Оценка</th><th>Ответ</th><th>Действие</th></tr></thead><tbody>';
@@ -996,7 +998,7 @@ def index():
                         <div><label>Профессионализм</label><div class="flex gap-1 stars" data-crit="prof">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="profVal"></div>
                         <div><label>Вежливость</label><div class="flex gap-1 stars" data-crit="politeness">${[1,2,3,4,5].map(v=>`<span class="star text-2xl cursor-pointer hover:text-yellow-400" data-val="${v}">★</span>`).join('')}</div><input type="hidden" id="politenessVal"></div>
                         <div><label>Комментарий</label><textarea id="reviewComment" rows="3" class="w-full border rounded p-2"></textarea></div>
-                        <div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600" onclick="this.closest('#reviewModal').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700" onclick="submitReview(${id})">Отправить</button></div>
+                        <div class="flex justify-end gap-2"><button class="bg-gray-500 px-4 py-2 rounded hover:bg-gray-600" onclick="this.closest('.fixed').remove()">Отмена</button><button class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700" onclick="submitReview(${id})">Отправить</button></div>
                     </div>
                 </div>
             `;
@@ -1052,7 +1054,6 @@ def index():
         };
     }
 
-    // Улучшенная База знаний с читаемыми стилями
     async function renderKnowledge(container) {
         let articles = await api('/api/knowledge');
         const wrapper = document.createElement('div');
@@ -1116,7 +1117,7 @@ def index():
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="closeTicket(${t.id})">Закрыть</button>`;
             html += `<tr><td data-label="Номер">${t.id}<td data-label="Название">${t.title}<td data-label="Описание">${t.description||'—'}<td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span><td data-label="Приоритет">${t.priority}<td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</tr>`;
         }
-        html += `</tbody></tr></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
         window.resolve = async (id) => { let rev = prompt("Комментарий к решению (будет виден клиенту):"); if(rev !== null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
@@ -1288,7 +1289,6 @@ def index():
     """)
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 8080))
-    print(f"\n🚀 Сервер Оптимасеть запущен на порту {port}")
+    print(f"\n🚀 Сервер Quality Monitor Pro запущен на порту {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
