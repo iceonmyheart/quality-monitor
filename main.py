@@ -9,22 +9,35 @@ import secrets
 import csv
 import io
 import os
+import sys
 
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # ------------------------------------------------------------
-# Путь к базе данных (в папке с приложением)
+# Путь к базе данных (для Render используем /tmp, иначе папка с приложением)
 # ------------------------------------------------------------
-DB_PATH = os.path.join(os.path.dirname(__file__), "monitoring.db")
+if os.environ.get("RENDER"):
+    DB_PATH = os.path.join("/tmp", "monitoring.db")
+else:
+    DB_PATH = os.path.join(os.path.dirname(__file__), "monitoring.db")
+
+print(f"📁 База данных: {DB_PATH}", file=sys.stderr)
 
 # ------------------------------------------------------------
 # Инициализация базы данных (с тестовыми заявками)
 # ------------------------------------------------------------
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+    except Exception as e:
+        print(f"❌ Ошибка подключения к {DB_PATH}: {e}", file=sys.stderr)
+        print("⚠️ Переключаемся на in-memory базу (данные не сохранятся)", file=sys.stderr)
+        conn = sqlite3.connect(":memory:")
+        c = conn.cursor()
+
     # Таблицы
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,6 +114,7 @@ def init_db():
         category_id INTEGER,
         created_at TEXT
     )''')
+
     # Начальные данные
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
     c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
@@ -109,6 +123,7 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
     c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
+
     # Предустановленные пользователи
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
@@ -168,6 +183,7 @@ def init_db():
                     VALUES ('Проблема с биллингом', 'Двойное списание за услуги', 'in_progress', 'critical', 'Доступ и права', ?, 2)""", (now.isoformat(),))
     conn.commit()
     conn.close()
+    print("✅ Инициализация БД завершена", file=sys.stderr)
 
 init_db()
 sessions = {}
@@ -1290,5 +1306,5 @@ def index():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    print(f"\n🚀 Сервер Quality Monitor Pro запущен на порту {port}")
+    print(f"\n🚀 Сервер Quality Monitor Pro запущен на порту {port}", file=sys.stderr)
     uvicorn.run(app, host="0.0.0.0", port=port)
