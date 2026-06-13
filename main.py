@@ -298,7 +298,6 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
     conn.close()
     return {"message": "OK"}
 
-# ---------- Комментарии ----------
 @app.post("/api/tickets/{ticket_id}/comments")
 def add_comment(ticket_id: int, comment: str = Form(...), session: str = Cookie(None)):
     if not session or session not in sessions:
@@ -642,19 +641,59 @@ def index():
         body.dark input, body.dark select, body.dark textarea { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; }
         input, select, textarea { border-radius: 0.5rem; padding: 0.5rem; width: 100%; outline: none; }
         input:focus, select:focus, textarea:focus { border-color: #15803d; }
-        @media (max-width: 768px) {
-            body { padding: 0.5rem; }
-            .container { padding: 0.5rem; }
-            .card { padding: 1rem; margin-bottom: 1rem; }
-            .tab-btn { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
-            .btn-primary { padding: 0.6rem 1rem; font-size: 1rem; }
-            table, thead, tbody, th, td, tr { display: block; }
-            thead { display: none; }
-            tr { margin-bottom: 1rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.5rem; background: inherit; }
-            td { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem; border-bottom: none; }
-            td:before { content: attr(data-label); font-weight: bold; width: 40%; color: #15803d; }
-            .grid { grid-template-columns: 1fr !important; }
+        
+        /* Адаптивное модальное окно */
+        .ticket-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
         }
+        .ticket-modal-content {
+            background: var(--bg);
+            border-radius: 1.5rem;
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 700px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 35px rgba(0,0,0,0.3);
+        }
+        @media (max-width: 640px) {
+            .ticket-modal-content {
+                padding: 1rem;
+                width: 95%;
+            }
+            .ticket-modal-content h2 {
+                font-size: 1.2rem;
+            }
+            .ticket-modal-content button {
+                padding: 0.5rem 0.8rem;
+                font-size: 0.8rem;
+            }
+            .ticket-modal-content textarea {
+                font-size: 0.9rem;
+            }
+        }
+        .comments-list {
+            max-height: 40vh;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+        }
+        .comment-item {
+            background: var(--card-bg);
+            border-radius: 0.75rem;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        body.light .comment-item { background: #f1f5f9; }
+        body.dark .comment-item { background: #1e293b; }
     </style>
 </head>
 <body class="light">
@@ -803,39 +842,41 @@ def index():
             if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm" onclick="openDetailedReview(${t.id})">Оценить</button>`;
             html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
         }
-        html += `</tbody></table></div>`;
+        html += `</tbody></tr></div>`;
         container.innerHTML = html;
         
-        // Функция просмотра заявки с комментариями
+        // Функция просмотра заявки с комментариями (адаптивное окно)
         window.viewTicket = async (id) => {
             let ticketsData = await api('/api/tickets');
             let ticket = ticketsData.tickets.find(t => t.id === id);
             if (!ticket) return;
             let comments = await api(`/api/tickets/${id}/comments`);
             let modalHtml = `
-                <div id="ticketModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+                <div id="ticketModal" class="ticket-modal">
+                    <div class="ticket-modal-content">
                         <h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2>
-                        <div><strong>Название:</strong> ${ticket.title}</div>
-                        <div><strong>Описание:</strong> ${ticket.description || '—'}</div>
-                        <div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div>
-                        <div><strong>Приоритет:</strong> ${ticket.priority}</div>
-                        <div><strong>Категория:</strong> ${ticket.category || '—'}</div>
-                        <div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div>
-                        <hr class="my-4">
+                        <div class="space-y-2 mb-4">
+                            <div><strong>Название:</strong> ${ticket.title}</div>
+                            <div><strong>Описание:</strong> ${ticket.description || '—'}</div>
+                            <div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div>
+                            <div><strong>Приоритет:</strong> ${ticket.priority}</div>
+                            <div><strong>Категория:</strong> ${ticket.category || '—'}</div>
+                            <div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div>
+                        </div>
+                        <hr class="my-2">
                         <h3 class="font-semibold mb-2">Комментарии</h3>
-                        <div id="commentsList" class="space-y-2 max-h-60 overflow-y-auto mb-4">
+                        <div id="commentsList" class="comments-list">
                             ${comments.map(c => `
-                                <div class="bg-gray-100 dark:bg-gray-700 p-2 rounded">
+                                <div class="comment-item">
                                     <span class="font-semibold">${c.user_name}</span> <span class="text-xs text-gray-500">${new Date(c.created_at).toLocaleString()}</span>
-                                    <div>${c.comment}</div>
+                                    <div class="mt-1">${c.comment}</div>
                                 </div>
                             `).join('')}
                         </div>
-                        <textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea>
+                        <textarea id="newComment" rows="2" class="w-full border rounded-lg p-2 mb-2" placeholder="Напишите комментарий..."></textarea>
                         <div class="flex justify-end gap-2">
-                            <button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button>
-                            <button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button>
+                            <button class="bg-gray-500 text-white px-4 py-2 rounded-lg" onclick="closeModal()">Закрыть</button>
+                            <button class="bg-blue-600 text-white px-4 py-2 rounded-lg" onclick="addComment(${id})">Отправить</button>
                         </div>
                     </div>
                 </div>
@@ -937,7 +978,7 @@ def index():
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><td><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></td></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm" onclick="assign(${t.id})">Принять</button>`;
@@ -945,36 +986,40 @@ def index():
             if(t.status === 'resolved') actions = `<button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="closeTicket(${t.id})">Закрыть</button>`;
             html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Описание">${t.description||'—'}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="viewTicket(${t.id})">Открыть</button> ${actions}</td></tr>`;
         }
-        html += `</tbody></tr></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.assign = async (id) => { await api(`/api/tickets/${id}?status=in_progress&assigned_to_id=${currentUser.id}`,'PUT'); renderUI(); };
         window.resolve = async (id) => { let rev = prompt("Комментарий к решению (будет виден клиенту):"); if(rev !== null) { await api(`/api/tickets/${id}?status=resolved&review=${encodeURIComponent(rev)}`,'PUT'); renderUI(); } };
         window.closeTicket = async (id) => { await api(`/api/tickets/${id}?status=closed`,'PUT'); renderUI(); };
         window.respond = async (id) => { let msg = prompt("Ответ клиенту:"); if(msg) { await api(`/api/tickets/${id}?review=${encodeURIComponent(msg)}`,'PUT'); renderUI(); } };
+        // Та же самая адаптивная функция viewTicket, что и у клиента (используется та же глобальная)
+        // Она уже определена в renderClientTickets, но для оператора нужно переопределить, если вдруг не сработает
         window.viewTicket = async (id) => {
             let ticketsData = await api('/api/tickets');
             let ticket = ticketsData.tickets.find(t => t.id === id);
             if (!ticket) return;
             let comments = await api(`/api/tickets/${id}/comments`);
             let modalHtml = `
-                <div id="ticketModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+                <div id="ticketModal" class="ticket-modal">
+                    <div class="ticket-modal-content">
                         <h2 class="text-xl font-bold mb-4">Заявка №${ticket.id}</h2>
-                        <div><strong>Название:</strong> ${ticket.title}</div>
-                        <div><strong>Описание:</strong> ${ticket.description || '—'}</div>
-                        <div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div>
-                        <div><strong>Приоритет:</strong> ${ticket.priority}</div>
-                        <div><strong>Категория:</strong> ${ticket.category || '—'}</div>
-                        <div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div>
-                        <hr class="my-4">
-                        <h3 class="font-semibold mb-2">Комментарии</h3>
-                        <div id="commentsList" class="space-y-2 max-h-60 overflow-y-auto mb-4">
-                            ${comments.map(c => `<div class="bg-gray-100 dark:bg-gray-700 p-2 rounded"><span class="font-semibold">${c.user_name}</span> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${c.comment}</div></div>`).join('')}
+                        <div class="space-y-2 mb-4">
+                            <div><strong>Название:</strong> ${ticket.title}</div>
+                            <div><strong>Описание:</strong> ${ticket.description || '—'}</div>
+                            <div><strong>Статус:</strong> <span class="status-badge status-${ticket.status}">${ticket.status}</span></div>
+                            <div><strong>Приоритет:</strong> ${ticket.priority}</div>
+                            <div><strong>Категория:</strong> ${ticket.category || '—'}</div>
+                            <div><strong>Создана:</strong> ${new Date(ticket.created_at).toLocaleString()}</div>
                         </div>
-                        <textarea id="newComment" rows="2" class="w-full border rounded p-2 mb-2" placeholder="Напишите комментарий..."></textarea>
+                        <hr class="my-2">
+                        <h3 class="font-semibold mb-2">Комментарии</h3>
+                        <div id="commentsList" class="comments-list">
+                            ${comments.map(c => `<div class="comment-item"><span class="font-semibold">${c.user_name}</span> <span class="text-xs">${new Date(c.created_at).toLocaleString()}</span><div>${c.comment}</div></div>`).join('')}
+                        </div>
+                        <textarea id="newComment" rows="2" class="w-full border rounded-lg p-2 mb-2" placeholder="Напишите комментарий..."></textarea>
                         <div class="flex justify-end gap-2">
-                            <button class="bg-gray-500 text-white px-4 py-2 rounded" onclick="closeModal()">Закрыть</button>
-                            <button class="bg-blue-600 text-white px-4 py-2 rounded" onclick="addComment(${id})">Отправить</button>
+                            <button class="bg-gray-500 text-white px-4 py-2 rounded-lg" onclick="closeModal()">Закрыть</button>
+                            <button class="bg-blue-600 text-white px-4 py-2 rounded-lg" onclick="addComment(${id})">Отправить</button>
                         </div>
                     </div>
                 </div>
@@ -999,9 +1044,9 @@ def index():
 
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></td></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
+            html += `<tr><td data-label="ID">${u.id}<tr><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -1022,7 +1067,7 @@ def index():
         let logs = await api('/api/admin/logs');
         let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
         for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
-        html += `</tbody><td></div>`;
+        html += `</tbody><table></div>`;
         container.innerHTML = html;
     }
 
