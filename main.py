@@ -109,12 +109,10 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
 
-    # Получаем id оператора
     c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
     op_row = c.fetchone()
     operator_id = op_row[0] if op_row else 2
 
-    # --- Тестовые заявки (15 штук) ---
     c.execute("SELECT COUNT(*) FROM tickets")
     if c.fetchone()[0] == 0:
         now = datetime.now()
@@ -263,13 +261,25 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
     c = conn.cursor()
     updates = []
     params = []
+
+    # Получаем текущую заявку для проверки first_response_at
+    c.execute("SELECT status, first_response_at FROM tickets WHERE id=?", (ticket_id,))
+    current = c.fetchone()
+    if not current:
+        conn.close()
+        raise HTTPException(404, "Ticket not found")
+    current_status, first_resp = current
+
     if status:
         updates.append("status=?")
         params.append(status)
-        if status == "in_progress" and not assigned_to_id:
-            assigned_to_id = user["id"]
-            updates.append("first_response_at=?")
-            params.append(datetime.now().isoformat())
+        if status == "in_progress":
+            # Если заявка переходит в работу и first_response_at ещё не установлен
+            if not first_resp:
+                updates.append("first_response_at=?")
+                params.append(datetime.now().isoformat())
+            if assigned_to_id is None:
+                assigned_to_id = user["id"]
         if status == "resolved":
             resolved_at = datetime.now().isoformat()
             updates.append("resolved_at=?")
@@ -282,15 +292,22 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
                 resolution_minutes = int((resolved - created).total_seconds() / 60)
                 updates.append("resolution_time_minutes=?")
                 params.append(resolution_minutes)
-    if assigned_to_id:
+        if status == "closed":
+            updates.append("closed_at=?")
+            params.append(datetime.now().isoformat())
+
+    if assigned_to_id is not None:
         updates.append("assigned_to_id=?")
         params.append(assigned_to_id)
+
     if satisfaction is not None:
         updates.append("satisfaction=?")
         params.append(satisfaction)
+
     if review is not None:
         updates.append("review=?")
         params.append(review)
+
     params.append(ticket_id)
     if updates:
         c.execute(f"UPDATE tickets SET {','.join(updates)} WHERE id=?", params)
@@ -663,6 +680,64 @@ def index():
         .bg-green-600:hover { background: #166534 !important; transform: scale(1.02); }
         .bg-red-600:hover { background: #b91c1c !important; transform: scale(1.02); }
         .bg-yellow-500:hover { background: #ca8a04 !important; transform: scale(1.02); }
+        
+        /* ---------- Улучшенная читаемость для вкладки "База знаний" и поля поиска ---------- */
+        .knowledge-title {
+            font-size: 1.5rem !important;
+            font-weight: 700 !important;
+            color: #111827 !important;
+            margin-bottom: 1rem !important;
+        }
+        body.dark .knowledge-title {
+            color: #f3f4f6 !important;
+        }
+        .knowledge-search {
+            font-size: 1rem !important;
+            padding: 0.75rem 1rem !important;
+            border: 1px solid #9ca3af !important;
+            border-radius: 0.75rem !important;
+            background-color: #ffffff !important;
+            color: #1f2937 !important;
+            margin-bottom: 1.5rem !important;
+        }
+        body.dark .knowledge-search {
+            background-color: #1e293b !important;
+            color: #e2e8f0 !important;
+            border-color: #4b5563 !important;
+        }
+        .knowledge-search::placeholder {
+            color: #6b7280 !important;
+            opacity: 1 !important;
+        }
+        body.dark .knowledge-search::placeholder {
+            color: #9ca3af !important;
+        }
+        .article-card {
+            background: #f9fafb;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            transition: all 0.2s;
+        }
+        body.dark .article-card {
+            background: #2d3748;
+        }
+        .article-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+            color: #0f172a;
+        }
+        body.dark .article-title {
+            color: #f1f5f9;
+        }
+        .article-content {
+            color: #334155;
+            font-size: 0.9rem;
+        }
+        body.dark .article-content {
+            color: #cbd5e1;
+        }
     </style>
 </head>
 <body class="light">
@@ -865,7 +940,7 @@ def index():
         for(let t of data.tickets) {
             let actionBtn = '';
             if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span><tr><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
+            html += `<tr><td data-label="Номер">${t.id}</td><td data-label="Название">${t.title}</td><td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span></td><td data-label="Приоритет">${t.priority}</td><td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}</td><td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}</td><td data-label="Ответ">${t.review||'—'}</td><td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -980,25 +1055,66 @@ def index():
         };
     }
 
+    // ИСПРАВЛЕННАЯ функция renderKnowledge с локальным поиском и улучшенной читаемостью
     async function renderKnowledge(container) {
+        // Загружаем все статьи
         let articles = await api('/api/knowledge');
-        let html = `<div class="card"><h3 class="text-xl font-semibold mb-4">База знаний</h3><input type="text" id="kbSearch" placeholder="Поиск..." class="mb-4">`;
-        html += articles.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg mb-2 hover:shadow transition"><b>${a.title}</b><br>${a.content}</div>`).join('');
-        html += `</div>`;
-        container.innerHTML = html;
-        document.getElementById('kbSearch').addEventListener('input', async (e) => {
-            let arts = await api(`/api/knowledge?search=${encodeURIComponent(e.target.value)}`);
-            let listDiv = document.querySelector('#pane-2 .card .mb-4').nextSibling;
-            if(listDiv) listDiv.remove();
-            let newDiv = document.createElement('div');
-            newDiv.innerHTML = arts.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg mb-2"><b>${a.title}</b><br>${a.content}</div>`).join('');
-            document.querySelector('#pane-2 .card').appendChild(newDiv);
+        // Создаём структуру
+        const wrapper = document.createElement('div');
+        wrapper.className = 'card';
+        wrapper.innerHTML = `
+            <h3 class="knowledge-title">📚 База знаний</h3>
+            <input type="text" id="kbSearchInput" class="knowledge-search w-full" placeholder="Поиск...">
+            <div id="articlesList"></div>
+        `;
+        container.appendChild(wrapper);
+        
+        const searchInput = wrapper.querySelector('#kbSearchInput');
+        const articlesDiv = wrapper.querySelector('#articlesList');
+        
+        function renderArticles(articlesArray) {
+            if (articlesArray.length === 0) {
+                articlesDiv.innerHTML = '<div class="text-center text-gray-500 py-4">Статей не найдено</div>';
+                return;
+            }
+            articlesDiv.innerHTML = articlesArray.map(a => `
+                <div class="article-card">
+                    <div class="article-title">${escapeHtml(a.title)}</div>
+                    <div class="article-content">${escapeHtml(a.content)}</div>
+                </div>
+            `).join('');
+        }
+        
+        function escapeHtml(str) {
+            return str.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
+                return c;
+            });
+        }
+        
+        renderArticles(articles);
+        
+        searchInput.addEventListener('input', async (e) => {
+            const query = e.target.value.trim();
+            let filtered;
+            if (query === '') {
+                filtered = articles;
+            } else {
+                // Ищем на клиенте, можно и через API, но API уже есть
+                const response = await api(`/api/knowledge?search=${encodeURIComponent(query)}`);
+                filtered = response;
+            }
+            renderArticles(filtered);
         });
     }
 
     async function renderOperatorTickets(container) {
         let data = await api('/api/tickets');
-        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></td></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>Номер</th><th>Название</th><th>Описание</th><th>Статус</th><th>Приоритет</th><th>Действия</th></tr></thead><tbody>';
         for(let t of data.tickets) {
             let actions = '';
             if(t.status === 'new') actions = `<button class="bg-yellow-500 text-white px-2 py-1 rounded text-sm hover:bg-yellow-600" onclick="assign(${t.id})">Принять</button>`;
@@ -1064,12 +1180,12 @@ def index():
         let users = await api('/api/users');
         let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}<tr><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></div>`;
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
-        html += `</tbody><tr></div>`;
+        html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
-        window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await fetch(`/api/users/${id}`, { method:'DELETE' }); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
+        window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await api(`/api/users/${id}`, 'DELETE'); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
     }
 
     async function renderAdminSLA(container) {
@@ -1083,8 +1199,8 @@ def index():
 
     async function renderAdminLogs(container) {
         let logs = await api('/api/admin/logs');
-        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></table></thead><tbody>`;
-        for(let l of logs) html += `<td><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
+        let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
+        for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}</td><td data-label="Пользователь">${l.user_id}</td><td data-label="Действие">${l.action}</td><td data-label="Детали">${l.details||''}</td></tr>`;
         html += `</tbody></table></div>`;
         container.innerHTML = html;
     }
