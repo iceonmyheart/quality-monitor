@@ -1,6 +1,6 @@
 import uvicorn
-from fastapi import FastAPI, HTTPException, Form, Cookie, Response
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Form, Cookie, Response, Request
+from fastapi.responses import HTMLResponse, StreamingResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from datetime import datetime, timedelta
@@ -10,6 +10,7 @@ import csv
 import io
 import os
 import sys
+import traceback
 
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -26,6 +27,19 @@ else:
 print(f"📁 База данных: {DB_PATH}", file=sys.stderr)
 
 # ------------------------------------------------------------
+# Диагностический middleware — перехватывает все ошибки и выводит их в ответ
+# (временно, для выявления причины 500)
+# ------------------------------------------------------------
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        error_text = f"Ошибка: {type(e).__name__}: {str(e)}\n\n{traceback.format_exc()}"
+        print(error_text, file=sys.stderr)
+        return PlainTextResponse(error_text, status_code=500)
+
+# ------------------------------------------------------------
 # Инициализация базы данных (с тестовыми заявками)
 # ------------------------------------------------------------
 def init_db():
@@ -38,152 +52,158 @@ def init_db():
         conn = sqlite3.connect(":memory:")
         c = conn.cursor()
 
-    # Таблицы
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE,
-        full_name TEXT,
-        hashed_password TEXT,
-        role TEXT,
-        created_at TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS tickets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
-        description TEXT,
-        status TEXT,
-        priority TEXT,
-        category TEXT,
-        created_at TEXT,
-        first_response_at TEXT,
-        resolved_at TEXT,
-        closed_at TEXT,
-        satisfaction INTEGER,
-        review TEXT,
-        assigned_to_id INTEGER,
-        created_by_id INTEGER,
-        response_time_minutes INTEGER,
-        resolution_time_minutes INTEGER
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS detailed_reviews (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticket_id INTEGER,
-        overall_rating INTEGER,
-        speed_rating INTEGER,
-        professionalism_rating INTEGER,
-        politeness_rating INTEGER,
-        comment TEXT,
-        created_at TEXT
-    )''')
-    c.execute("CREATE INDEX IF NOT EXISTS idx_reviews_ticket ON detailed_reviews(ticket_id)")
-    c.execute('''CREATE TABLE IF NOT EXISTS comments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticket_id INTEGER,
-        user_id INTEGER,
-        comment TEXT,
-        created_at TEXT,
-        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS attachments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticket_id INTEGER,
-        filename TEXT,
-        filepath TEXT,
-        uploaded_at TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS system_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_time TEXT,
-        user_id INTEGER,
-        action TEXT,
-        details TEXT
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS sla_settings (
-        param_key TEXT PRIMARY KEY,
-        param_value INTEGER
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS categories (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS knowledge_articles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
-        content TEXT,
-        category_id INTEGER,
-        created_at TEXT
-    )''')
+    try:
+        # Таблицы
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            full_name TEXT,
+            hashed_password TEXT,
+            role TEXT,
+            created_at TEXT
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            description TEXT,
+            status TEXT,
+            priority TEXT,
+            category TEXT,
+            created_at TEXT,
+            first_response_at TEXT,
+            resolved_at TEXT,
+            closed_at TEXT,
+            satisfaction INTEGER,
+            review TEXT,
+            assigned_to_id INTEGER,
+            created_by_id INTEGER,
+            response_time_minutes INTEGER,
+            resolution_time_minutes INTEGER
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS detailed_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER,
+            overall_rating INTEGER,
+            speed_rating INTEGER,
+            professionalism_rating INTEGER,
+            politeness_rating INTEGER,
+            comment TEXT,
+            created_at TEXT
+        )''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_reviews_ticket ON detailed_reviews(ticket_id)")
+        c.execute('''CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER,
+            user_id INTEGER,
+            comment TEXT,
+            created_at TEXT,
+            FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER,
+            filename TEXT,
+            filepath TEXT,
+            uploaded_at TEXT
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS system_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_time TEXT,
+            user_id INTEGER,
+            action TEXT,
+            details TEXT
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS sla_settings (
+            param_key TEXT PRIMARY KEY,
+            param_value INTEGER
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS knowledge_articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            content TEXT,
+            category_id INTEGER,
+            created_at TEXT
+        )''')
 
-    # Начальные данные
-    c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
-    c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
-    c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Технические проблемы')")
-    c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (2, 'Консультации')")
-    c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
-    c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
+        # Начальные данные
+        c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
+        c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
+        c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Технические проблемы')")
+        c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (2, 'Консультации')")
+        c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (3, 'Доступ и права')")
+        c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
+        c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
 
-    # Предустановленные пользователи
-    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
-    c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
+        # Предустановленные пользователи
+        c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
+        c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
+        c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
+        c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
 
-    c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
-    op_row = c.fetchone()
-    operator_id = op_row[0] if op_row else 2
+        c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
+        op_row = c.fetchone()
+        operator_id = op_row[0] if op_row else 2
 
-    c.execute("SELECT COUNT(*) FROM tickets")
-    if c.fetchone()[0] == 0:
-        now = datetime.now()
-        test_tickets = [
-            ("Не работает Wi-Fi в офисе", "С утра пропал Wi-Fi на всех устройствах. Роутер перезагружали – не помогло.", "resolved", "high", "Технические проблемы", (now - timedelta(days=1)).isoformat(), operator_id, "Проверили оборудование, проблема в настройках DNS. Восстановили доступ.", 4),
-            ("Не грузит CRM-система", "При входе в CRM вылетает ошибка 500. Работа встала.", "resolved", "critical", "Технические проблемы", (now - timedelta(days=2)).isoformat(), operator_id, "Обнаружен сбой на сервере БД. Перезапустили службы. Ошибка устранена.", 5),
-            ("Тормозит видеоконференция", "При звонках в Zoom постоянные задержки и разрывы.", "resolved", "medium", "Технические проблемы", (now - timedelta(days=3)).isoformat(), operator_id, "Проблема в настройках QoS вашего роутера. Оптимизировали трафик.", 4),
-            ("Не отправляется почта через Outlook", "Исходящие письма зависают в очереди.", "resolved", "high", "Технические проблемы", (now - timedelta(days=4)).isoformat(), operator_id, "Обновили настройки SMTP-сервера. Всё должно работать.", 5),
-            ("Не синхронизируется OneDrive", "Папка на рабочем столе не синхронизируется с облаком.", "resolved", "low", "Технические проблемы", (now - timedelta(days=5)).isoformat(), operator_id, "Сбросили кэш OneDrive. Рекомендуем обновить приложение.", 3),
-            ("Как настроить автоответ в Outlook?", "Нужна инструкция по настройке автоответчика.", "resolved", "low", "Консультации", (now - timedelta(days=6)).isoformat(), operator_id, "Инструкция: Файл → Автоответчик → Включить. Настройте текст.", 5),
-            ("Какие тарифы интернета для дома?", "Хочу подключить домашний интернет. Нужна консультация.", "resolved", "low", "Консультации", (now - timedelta(days=7)).isoformat(), operator_id, "Тарифы: 'Старт' 100 Мбит/с – 500 руб., 'Оптима' 300 Мбит/с – 700 руб.", 4),
-            ("Как восстановить пароль от личного кабинета?", "Не приходит письмо для сброса.", "resolved", "medium", "Консультации", (now - timedelta(days=8)).isoformat(), operator_id, "Отправили одноразовую ссылку на резервный email.", 5),
-            ("Выбор оборудования для офиса", "Нужен роутер и коммутаторы на 20 пользователей.", "resolved", "medium", "Консультации", (now - timedelta(days=9)).isoformat(), operator_id, "Рекомендуем MikroTik hAP ac2 + 2 коммутатора TP-Link.", 4),
-            ("Обучение работе в CRM", "Нужна консультация по основным функциям.", "resolved", "low", "Консультации", (now - timedelta(days=10)).isoformat(), operator_id, "Запишитесь на вебинар в четверг в 11:00. Видеоуроки в базе знаний.", 5),
-            ("Нет доступа к общей папке", "После смены пароля потерял доступ к \\\\server\\docs", "resolved", "high", "Доступ и права", (now - timedelta(days=11)).isoformat(), operator_id, "Ваша учётная запись повторно добавлена в группу доступа. Перезагрузите компьютер.", 5),
-            ("Не могу установить программу", "При установке требует прав администратора.", "resolved", "medium", "Доступ и права", (now - timedelta(days=12)).isoformat(), operator_id, "Создали заявку на удалённую установку. Программа будет установлена в течение часа.", 4),
-            ("Доступ к БД клиентов", "Менеджеру нужен доступ к таблице clients.", "resolved", "high", "Доступ и права", (now - timedelta(days=13)).isoformat(), operator_id, "Учётная запись с правами SELECT создана. Данные отправлены в личное сообщение.", 5),
-            ("Не работает VPN после обновления", "Ошибка аутентификации при подключении.", "resolved", "critical", "Доступ и права", (now - timedelta(days=14)).isoformat(), operator_id, "Перевыпустили сертификат. Приложили новый файл. Установите его.", 5),
-            ("Добавить сотрудника в группу Бухгалтерия", "Нужен доступ к 1С и общим папкам.", "resolved", "medium", "Доступ и права", (now - timedelta(days=15)).isoformat(), operator_id, "Создали учётную запись, добавили в группу. Логин отправлен руководителю.", 5),
-        ]
-        for t in test_tickets:
-            c.execute("""INSERT INTO tickets 
-                (title, description, status, priority, category, created_at, assigned_to_id, review, satisfaction)
-                VALUES (?,?,?,?,?,?,?,?,?)""", t)
-            ticket_id = c.lastrowid
-            overall = t[8]
-            if overall == 5:
-                speed = prof = politeness = 5
-            elif overall == 4:
-                speed = prof = politeness = 4
-            else:
-                speed = prof = politeness = 3
-            c.execute("""INSERT INTO detailed_reviews 
-                (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at)
-                VALUES (?,?,?,?,?,?,?)""",
-                (ticket_id, overall, speed, prof, politeness, t[7], (now - timedelta(days=1)).isoformat()))
-            resolved_at = (now - timedelta(days=1)).isoformat()
-            created_at = t[5]
-            created_dt = datetime.fromisoformat(created_at)
-            resolved_dt = datetime.fromisoformat(resolved_at)
-            resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
-            c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
-        # Активные заявки
-        c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
-                    VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
-        c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
-                    VALUES ('Проблема с биллингом', 'Двойное списание за услуги', 'in_progress', 'critical', 'Доступ и права', ?, 2)""", (now.isoformat(),))
-    conn.commit()
-    conn.close()
-    print("✅ Инициализация БД завершена", file=sys.stderr)
+        c.execute("SELECT COUNT(*) FROM tickets")
+        if c.fetchone()[0] == 0:
+            now = datetime.now()
+            test_tickets = [
+                ("Не работает Wi-Fi в офисе", "С утра пропал Wi-Fi на всех устройствах. Роутер перезагружали – не помогло.", "resolved", "high", "Технические проблемы", (now - timedelta(days=1)).isoformat(), operator_id, "Проверили оборудование, проблема в настройках DNS. Восстановили доступ.", 4),
+                ("Не грузит CRM-система", "При входе в CRM вылетает ошибка 500. Работа встала.", "resolved", "critical", "Технические проблемы", (now - timedelta(days=2)).isoformat(), operator_id, "Обнаружен сбой на сервере БД. Перезапустили службы. Ошибка устранена.", 5),
+                ("Тормозит видеоконференция", "При звонках в Zoom постоянные задержки и разрывы.", "resolved", "medium", "Технические проблемы", (now - timedelta(days=3)).isoformat(), operator_id, "Проблема в настройках QoS вашего роутера. Оптимизировали трафик.", 4),
+                ("Не отправляется почта через Outlook", "Исходящие письма зависают в очереди.", "resolved", "high", "Технические проблемы", (now - timedelta(days=4)).isoformat(), operator_id, "Обновили настройки SMTP-сервера. Всё должно работать.", 5),
+                ("Не синхронизируется OneDrive", "Папка на рабочем столе не синхронизируется с облаком.", "resolved", "low", "Технические проблемы", (now - timedelta(days=5)).isoformat(), operator_id, "Сбросили кэш OneDrive. Рекомендуем обновить приложение.", 3),
+                ("Как настроить автоответ в Outlook?", "Нужна инструкция по настройке автоответчика.", "resolved", "low", "Консультации", (now - timedelta(days=6)).isoformat(), operator_id, "Инструкция: Файл → Автоответчик → Включить. Настройте текст.", 5),
+                ("Какие тарифы интернета для дома?", "Хочу подключить домашний интернет. Нужна консультация.", "resolved", "low", "Консультации", (now - timedelta(days=7)).isoformat(), operator_id, "Тарифы: 'Старт' 100 Мбит/с – 500 руб., 'Оптима' 300 Мбит/с – 700 руб.", 4),
+                ("Как восстановить пароль от личного кабинета?", "Не приходит письмо для сброса.", "resolved", "medium", "Консультации", (now - timedelta(days=8)).isoformat(), operator_id, "Отправили одноразовую ссылку на резервный email.", 5),
+                ("Выбор оборудования для офиса", "Нужен роутер и коммутаторы на 20 пользователей.", "resolved", "medium", "Консультации", (now - timedelta(days=9)).isoformat(), operator_id, "Рекомендуем MikroTik hAP ac2 + 2 коммутатора TP-Link.", 4),
+                ("Обучение работе в CRM", "Нужна консультация по основным функциям.", "resolved", "low", "Консультации", (now - timedelta(days=10)).isoformat(), operator_id, "Запишитесь на вебинар в четверг в 11:00. Видеоуроки в базе знаний.", 5),
+                ("Нет доступа к общей папке", "После смены пароля потерял доступ к \\\\server\\docs", "resolved", "high", "Доступ и права", (now - timedelta(days=11)).isoformat(), operator_id, "Ваша учётная запись повторно добавлена в группу доступа. Перезагрузите компьютер.", 5),
+                ("Не могу установить программу", "При установке требует прав администратора.", "resolved", "medium", "Доступ и права", (now - timedelta(days=12)).isoformat(), operator_id, "Создали заявку на удалённую установку. Программа будет установлена в течение часа.", 4),
+                ("Доступ к БД клиентов", "Менеджеру нужен доступ к таблице clients.", "resolved", "high", "Доступ и права", (now - timedelta(days=13)).isoformat(), operator_id, "Учётная запись с правами SELECT создана. Данные отправлены в личное сообщение.", 5),
+                ("Не работает VPN после обновления", "Ошибка аутентификации при подключении.", "resolved", "critical", "Доступ и права", (now - timedelta(days=14)).isoformat(), operator_id, "Перевыпустили сертификат. Приложили новый файл. Установите его.", 5),
+                ("Добавить сотрудника в группу Бухгалтерия", "Нужен доступ к 1С и общим папкам.", "resolved", "medium", "Доступ и права", (now - timedelta(days=15)).isoformat(), operator_id, "Создали учётную запись, добавили в группу. Логин отправлен руководителю.", 5),
+            ]
+            for t in test_tickets:
+                c.execute("""INSERT INTO tickets 
+                    (title, description, status, priority, category, created_at, assigned_to_id, review, satisfaction)
+                    VALUES (?,?,?,?,?,?,?,?,?)""", t)
+                ticket_id = c.lastrowid
+                overall = t[8]
+                if overall == 5:
+                    speed = prof = politeness = 5
+                elif overall == 4:
+                    speed = prof = politeness = 4
+                else:
+                    speed = prof = politeness = 3
+                c.execute("""INSERT INTO detailed_reviews 
+                    (ticket_id, overall_rating, speed_rating, professionalism_rating, politeness_rating, comment, created_at)
+                    VALUES (?,?,?,?,?,?,?)""",
+                    (ticket_id, overall, speed, prof, politeness, t[7], (now - timedelta(days=1)).isoformat()))
+                resolved_at = (now - timedelta(days=1)).isoformat()
+                created_at = t[5]
+                created_dt = datetime.fromisoformat(created_at)
+                resolved_dt = datetime.fromisoformat(resolved_at)
+                resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
+                c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
+            # Активные заявки
+            c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
+                        VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
+            c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
+                        VALUES ('Проблема с биллингом', 'Двойное списание за услуги', 'in_progress', 'critical', 'Доступ и права', ?, 2)""", (now.isoformat(),))
+        conn.commit()
+        print("✅ База данных инициализирована успешно", file=sys.stderr)
+    except Exception as e:
+        print(f"❌ Ошибка при инициализации БД: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        raise
+    finally:
+        conn.close()
 
 init_db()
 sessions = {}
