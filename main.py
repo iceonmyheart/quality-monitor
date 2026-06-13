@@ -17,7 +17,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # ------------------------------------------------------------
-# Путь к базе данных (для Render используем /tmp, иначе папка с приложением)
+# Путь к базе данных (для Render используем /tmp)
 # ------------------------------------------------------------
 if os.environ.get("RENDER"):
     DB_PATH = os.path.join("/tmp", "monitoring.db")
@@ -27,8 +27,7 @@ else:
 print(f"📁 База данных: {DB_PATH}", file=sys.stderr)
 
 # ------------------------------------------------------------
-# Диагностический middleware — перехватывает все ошибки и выводит их в ответ
-# (временно, для выявления причины 500)
+# Диагностический middleware (покажет ошибку в браузере)
 # ------------------------------------------------------------
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
@@ -40,7 +39,7 @@ async def catch_exceptions_middleware(request: Request, call_next):
         return PlainTextResponse(error_text, status_code=500)
 
 # ------------------------------------------------------------
-# Инициализация базы данных (с тестовыми заявками)
+# Инициализация базы данных
 # ------------------------------------------------------------
 def init_db():
     try:
@@ -48,12 +47,10 @@ def init_db():
         c = conn.cursor()
     except Exception as e:
         print(f"❌ Ошибка подключения к {DB_PATH}: {e}", file=sys.stderr)
-        print("⚠️ Переключаемся на in-memory базу (данные не сохранятся)", file=sys.stderr)
         conn = sqlite3.connect(":memory:")
         c = conn.cursor()
 
     try:
-        # Таблицы
         c.execute('''CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE,
@@ -130,7 +127,6 @@ def init_db():
             created_at TEXT
         )''')
 
-        # Начальные данные
         c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_high_hours', 2)")
         c.execute("INSERT OR IGNORE INTO sla_settings (param_key, param_value) VALUES ('response_medium_hours', 8)")
         c.execute("INSERT OR IGNORE INTO categories (id, name) VALUES (1, 'Технические проблемы')")
@@ -139,7 +135,6 @@ def init_db():
         c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (1, 'Как сбросить пароль?', 'Обратитесь в техподдержку через форму заявки', 1, datetime('now'))")
         c.execute("INSERT OR IGNORE INTO knowledge_articles (id, title, content, category_id, created_at) VALUES (2, 'Настройка VPN', 'Скачайте конфигурационный файл из личного кабинета', 2, datetime('now'))")
 
-        # Предустановленные пользователи
         c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('admin@mail.ru', 'Администратор', 'admin123', 'admin', datetime('now'))")
         c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('operator@mail.ru', 'Оператор', 'operator123', 'operator', datetime('now'))")
         c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
@@ -191,7 +186,6 @@ def init_db():
                 resolved_dt = datetime.fromisoformat(resolved_at)
                 resolution_minutes = int((resolved_dt - created_dt).total_seconds() / 60)
                 c.execute("UPDATE tickets SET resolved_at=?, resolution_time_minutes=? WHERE id=?", (resolved_at, resolution_minutes, ticket_id))
-            # Активные заявки
             c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, created_by_id) 
                         VALUES ('Сайт не загружается', 'Ошибка 404 при открытии сайта', 'new', 'high', 'Технические проблемы', ?, 2)""", (now.isoformat(),))
             c.execute("""INSERT INTO tickets (title, description, status, priority, category, created_at, assigned_to_id) 
@@ -208,7 +202,9 @@ def init_db():
 init_db()
 sessions = {}
 
-# ---------------------------- API ----------------------------
+# ------------------------------------------------------------
+# API эндпоинты (полный набор)
+# ------------------------------------------------------------
 @app.post("/api/register")
 def register(email: str = Form(...), full_name: str = Form(...), password: str = Form(...), privacy_accepted: bool = Form(...)):
     if not privacy_accepted:
@@ -663,9 +659,6 @@ def privacy_policy():
 </html>
     """)
 
-# ------------------------------------------------------------
-# HTML (интерфейс) с улучшенной читаемостью базы знаний
-# ------------------------------------------------------------
 @app.get("/")
 def index():
     return HTMLResponse("""
@@ -975,7 +968,7 @@ def index():
         for(let t of data.tickets) {
             let actionBtn = '';
             if(t.status === 'resolved' && !t.satisfaction) actionBtn = `<button class="bg-green-600 text-white px-2 py-1 rounded text-sm hover:bg-green-700" onclick="openDetailedReview(${t.id})">Оценить</button>`;
-            html += `<tr><td data-label="Номер">${t.id}<td data-label="Название">${t.title}<td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span><td data-label="Приоритет">${t.priority}<td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}<td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}<td data-label="Ответ">${t.review||'—'}<td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</tr>`;
+            html += `<tr><td data-label="Номер">${t.id}<td data-label="Название">${t.title}<td data-label="Статус"><span class="status-badge status-${t.status}">${t.status}</span><td data-label="Приоритет">${t.priority}<td data-label="Дата">${new Date(t.created_at).toLocaleDateString()}<td data-label="Оценка">${t.satisfaction?'⭐'+t.satisfaction:'—'}<td data-label="Ответ">${t.review||'—'}<td data-label="Действие"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="viewTicket(${t.id})">Открыть</button> ${actionBtn}</td>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
@@ -1232,7 +1225,7 @@ def index():
         let logs = await api('/api/admin/logs');
         let html = `<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Логи</h3><table class="w-full"><thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>`;
         for(let l of logs) html += `<tr><td data-label="Время">${new Date(l.time).toLocaleString()}<td data-label="Пользователь">${l.user_id}<td data-label="Действие">${l.action}<td data-label="Детали">${l.details||''}</tr>`;
-        html += `</tbody></table></div>`;
+        html += `</tbody><tr></div>`;
         container.innerHTML = html;
     }
 
@@ -1281,7 +1274,7 @@ def index():
             <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-xl"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div>
         </div>
         <div class="mb-6"><canvas id="operatorChart" height="300"></canvas></div>
-        <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div>
+        <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></tr></div>
         </div>`;
         const users = await api('/api/users');
         const cats = await api('/api/categories');
@@ -1305,7 +1298,7 @@ def index():
             const opColors = ['#3b82f6','#ef4444','#22c55e','#facc15','#a855f7','#ec4899','#14b8a6','#f97316'];
             for(let op of data.operator_stats) {
                 let badge = op.overall_avg>=4.5?'bg-green-100 text-green-800':(op.overall_avg>=3?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800');
-                tableHtml += `<tr><td class="font-medium">${op.name}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</tr>`;
+                tableHtml += `<tr><td class="font-medium">${op.name}<td class="text-center">${op.count}<td class="text-center"><span class="px-2 py-1 rounded-full text-sm ${badge}">${op.overall_avg}</span><td class="text-center">${op.speed_avg}<td class="text-center">${op.prof_avg}<td class="text-center">${op.politeness_avg}</td>`;
             }
             document.getElementById('operatorTable').innerHTML = tableHtml;
             const ctx = document.getElementById('operatorChart').getContext('2d');
