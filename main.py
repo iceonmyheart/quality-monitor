@@ -8,6 +8,7 @@ import sqlite3
 import secrets
 import csv
 import io
+import os
 
 app = FastAPI(title="Quality Monitor Pro")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -109,12 +110,10 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('quality@mail.ru', 'Менеджер качества', 'quality123', 'quality', datetime('now'))")
     c.execute("INSERT OR IGNORE INTO users (email, full_name, hashed_password, role, created_at) VALUES ('client@example.com', 'Клиент', 'client', 'client', datetime('now'))")
 
-    # Получаем id оператора
     c.execute("SELECT id FROM users WHERE email='operator@mail.ru'")
     op_row = c.fetchone()
     operator_id = op_row[0] if op_row else 2
 
-    # --- Тестовые заявки (15 штук) ---
     c.execute("SELECT COUNT(*) FROM tickets")
     if c.fetchone()[0] == 0:
         now = datetime.now()
@@ -263,13 +262,25 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
     c = conn.cursor()
     updates = []
     params = []
+
+    # Получаем текущую заявку для проверки first_response_at
+    c.execute("SELECT status, first_response_at FROM tickets WHERE id=?", (ticket_id,))
+    current = c.fetchone()
+    if not current:
+        conn.close()
+        raise HTTPException(404, "Ticket not found")
+    current_status, first_resp = current
+
     if status:
         updates.append("status=?")
         params.append(status)
-        if status == "in_progress" and not assigned_to_id:
-            assigned_to_id = user["id"]
-            updates.append("first_response_at=?")
-            params.append(datetime.now().isoformat())
+        if status == "in_progress":
+            # Если заявка переходит в работу и first_response_at ещё не установлен
+            if not first_resp:
+                updates.append("first_response_at=?")
+                params.append(datetime.now().isoformat())
+            if assigned_to_id is None:
+                assigned_to_id = user["id"]
         if status == "resolved":
             resolved_at = datetime.now().isoformat()
             updates.append("resolved_at=?")
@@ -282,15 +293,22 @@ def update_ticket(ticket_id: int, status: str = None, assigned_to_id: int = None
                 resolution_minutes = int((resolved - created).total_seconds() / 60)
                 updates.append("resolution_time_minutes=?")
                 params.append(resolution_minutes)
-    if assigned_to_id:
+        if status == "closed":
+            updates.append("closed_at=?")
+            params.append(datetime.now().isoformat())
+
+    if assigned_to_id is not None:
         updates.append("assigned_to_id=?")
         params.append(assigned_to_id)
+
     if satisfaction is not None:
         updates.append("satisfaction=?")
         params.append(satisfaction)
+
     if review is not None:
         updates.append("review=?")
         params.append(review)
+
     params.append(ticket_id)
     if updates:
         c.execute(f"UPDATE tickets SET {','.join(updates)} WHERE id=?", params)
@@ -607,7 +625,7 @@ def privacy_policy():
     """)
 
 # ------------------------------------------------------------
-# HTML (интерфейс) с исправленной читаемостью аналитики оценок
+# HTML (интерфейс) с исправленными стилями для дашбордов
 # ------------------------------------------------------------
 @app.get("/")
 def index():
@@ -624,22 +642,26 @@ def index():
     <script src="https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js"></script>
     <style>
         * { transition: all 0.2s ease; }
-        body.light { background: #ffffff; color: #1e293b; }
-        body.dark { background: #0a192f; color: #e6f1ff; }
-        .card { background: var(--bg); border: 1px solid #e2e8f0; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; transition: transform 0.2s, box-shadow 0.2s; }
-        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
-        body.light .card { background: #ffffff; border-color: #e2e8f0; }
-        body.dark .card { background: #1e293b; border-color: #334155; }
+        body.light { background: #f1f5f9; color: #1e293b; }
+        body.dark { background: #0f172a; color: #e2e8f0; }
+        .card { border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        body.light .card { background: #ffffff; border: 1px solid #e2e8f0; }
+        body.dark .card { background: #1e293b; border: 1px solid #334155; }
         .btn-primary { background: #15803d; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; border: none; transition: all 0.2s; }
         .btn-primary:hover { background: #166534; transform: scale(1.02); box-shadow: 0 4px 12px rgba(21,128,61,0.4); }
         .tab-btn { padding: 0.5rem 1rem; border-radius: 2rem; cursor: pointer; transition: all 0.2s; }
         .tab-btn:hover { background: #15803d20; transform: translateY(-1px); }
-        .tab-btn.active { background: #15803d; color: white; box-shadow: 0 2px 8px rgba(21,128,61,0.3); }
+        body.light .tab-btn.active { background: #15803d; color: white; }
+        body.dark .tab-btn.active { background: #15803d; color: white; }
         .status-badge { display: inline-block; padding: 0.2rem 0.7rem; border-radius: 2rem; font-size: 0.7rem; font-weight: 600; }
-        .status-new { background: #facc1520; color: #facc15; }
-        .status-in_progress { background: #3b82f620; color: #3b82f6; }
-        .status-resolved { background: #22c55e20; color: #22c55e; }
-        .status-closed { background: #64748b20; color: #94a3b8; }
+        body.light .status-new { background: #fef3c7; color: #b45309; }
+        body.dark .status-new { background: #713f12; color: #fde68a; }
+        body.light .status-in_progress { background: #dbeafe; color: #1d4ed8; }
+        body.dark .status-in_progress { background: #1e3a8a; color: #93c5fd; }
+        body.light .status-resolved { background: #dcfce7; color: #15803d; }
+        body.dark .status-resolved { background: #14532d; color: #86efac; }
+        body.light .status-closed { background: #f1f5f9; color: #475569; }
+        body.dark .status-closed { background: #334155; color: #cbd5e1; }
         input, select, textarea { border-radius: 0.5rem; padding: 0.5rem; width: 100%; outline: none; transition: border 0.2s, box-shadow 0.2s; }
         body.light input, body.light select, body.light textarea { background: #f8fafc; border: 1px solid #cbd5e1; color: #1e293b; }
         body.dark input, body.dark select, body.dark textarea { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; }
@@ -648,10 +670,12 @@ def index():
         .tab-pane.active { display: block; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .ticket-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-        .ticket-modal-content { background: white; border-radius: 1.5rem; padding: 1.5rem; width: 90%; max-width: 700px; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); color: #1e293b; }
+        body.light .ticket-modal-content { background: white; color: #1e293b; }
         body.dark .ticket-modal-content { background: #1e293b; color: #e6f1ff; }
+        .ticket-modal-content { border-radius: 1.5rem; padding: 1.5rem; width: 90%; max-width: 700px; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
         .comments-list { max-height: 40vh; overflow-y: auto; margin-bottom: 1rem; }
-        .comment-item { background: #f1f5f9; border-radius: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem; }
+        .comment-item { border-radius: 0.75rem; padding: 0.75rem; margin-bottom: 0.5rem; }
+        body.light .comment-item { background: #f1f5f9; }
         body.dark .comment-item { background: #334155; }
         @media (max-width: 640px) {
             .ticket-modal-content { padding: 1rem; width: 95%; }
@@ -664,20 +688,104 @@ def index():
         .bg-red-600:hover { background: #b91c1c !important; transform: scale(1.02); }
         .bg-yellow-500:hover { background: #ca8a04 !important; transform: scale(1.02); }
         
-        /* Исправление читаемости для блоков аналитики оценок */
+        /* ---------- Улучшенная читаемость для вкладки "База знаний" и поля поиска ---------- */
+        .knowledge-title {
+            font-size: 1.5rem !important;
+            font-weight: 700 !important;
+            color: #111827 !important;
+            margin-bottom: 1rem !important;
+        }
+        body.dark .knowledge-title {
+            color: #f3f4f6 !important;
+        }
+        .knowledge-search {
+            font-size: 1rem !important;
+            padding: 0.75rem 1rem !important;
+            border: 1px solid #9ca3af !important;
+            border-radius: 0.75rem !important;
+            background-color: #ffffff !important;
+            color: #1f2937 !important;
+            margin-bottom: 1.5rem !important;
+        }
+        body.dark .knowledge-search {
+            background-color: #1e293b !important;
+            color: #e2e8f0 !important;
+            border-color: #4b5563 !important;
+        }
+        .knowledge-search::placeholder {
+            color: #6b7280 !important;
+            opacity: 1 !important;
+        }
+        body.dark .knowledge-search::placeholder {
+            color: #9ca3af !important;
+        }
+        .article-card {
+            background: #f9fafb;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            transition: all 0.2s;
+        }
+        body.dark .article-card {
+            background: #2d3748;
+        }
+        .article-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+            color: #0f172a;
+        }
+        body.dark .article-title {
+            color: #f1f5f9;
+        }
+        .article-content {
+            color: #334155;
+            font-size: 0.9rem;
+        }
+        body.dark .article-content {
+            color: #cbd5e1;
+        }
+        
+        /* Исправления для дашборда и аналитики – фон и текст всегда контрастны */
         .metric-card {
             border-radius: 0.75rem;
             padding: 1rem;
             text-align: center;
-            transition: all 0.2s;
         }
         body.light .metric-card {
             background: #f1f5f9;
-            color: #1e293b; /* чёрный текст на светлом фоне */
+            color: #1e293b;
         }
         body.dark .metric-card {
             background: #1e293b;
-            color: #e2e8f0; /* белый текст на тёмном фоне */
+            color: #e2e8f0;
+        }
+        .chart-container {
+            border-radius: 0.75rem;
+            padding: 1rem;
+        }
+        body.light .chart-container {
+            background: #f8fafc;
+        }
+        body.dark .chart-container {
+            background: #0f172a;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid;
+        }
+        body.light th, body.light td {
+            border-color: #e2e8f0;
+            color: #1e293b;
+        }
+        body.dark th, body.dark td {
+            border-color: #334155;
+            color: #e2e8f0;
         }
     </style>
 </head>
@@ -711,6 +819,17 @@ def index():
         if(theme === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); document.getElementById('themeToggle').innerText = '☀️'; }
         else { document.body.classList.remove('dark'); document.body.classList.add('light'); document.getElementById('themeToggle').innerText = '🌙'; }
         localStorage.setItem('theme', theme);
+        // перерисовываем графики при смене темы
+        if(window.statusChart) {
+            window.statusChart.destroy();
+            window.trendChart.destroy();
+            window.opChart?.destroy();
+        }
+        const activePane = document.querySelector('.tab-pane.active');
+        if(activePane && window.currentTabs) {
+            const idx = activePane.id.split('-')[1];
+            if(window.currentTabs[idx]) window.currentTabs[idx].render(activePane);
+        }
     }
     applyTheme();
     document.getElementById('themeToggle').onclick = () => { theme = theme === 'dark' ? 'light' : 'dark'; applyTheme(); };
@@ -998,17 +1117,13 @@ def index():
 
     async function renderKnowledge(container) {
         let articles = await api('/api/knowledge');
-        let html = `<div class="card"><h3 class="text-xl font-semibold mb-4">База знаний</h3><input type="text" id="kbSearch" placeholder="Поиск..." class="mb-4">`;
-        html += articles.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg mb-2 hover:shadow transition"><b>${a.title}</b><br>${a.content}</div>`).join('');
-        html += `</div>`;
+        let html = `<div class="card"><h3 class="knowledge-title">📚 База знаний</h3><input type="text" id="kbSearchInput" class="knowledge-search w-full" placeholder="Поиск...">`;
+        html += `<div id="articlesList">${articles.map(a=>`<div class="article-card"><div class="article-title">${a.title}</div><div class="article-content">${a.content}</div></div>`).join('')}</div></div>`;
         container.innerHTML = html;
-        document.getElementById('kbSearch').addEventListener('input', async (e) => {
+        document.getElementById('kbSearchInput').addEventListener('input', async (e) => {
             let arts = await api(`/api/knowledge?search=${encodeURIComponent(e.target.value)}`);
-            let listDiv = document.querySelector('#pane-2 .card .mb-4').nextSibling;
-            if(listDiv) listDiv.remove();
-            let newDiv = document.createElement('div');
-            newDiv.innerHTML = arts.map(a=>`<div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg mb-2"><b>${a.title}</b><br>${a.content}</div>`).join('');
-            document.querySelector('#pane-2 .card').appendChild(newDiv);
+            let listDiv = document.getElementById('articlesList');
+            listDiv.innerHTML = arts.map(a=>`<div class="article-card"><div class="article-title">${a.title}</div><div class="article-content">${a.content}</div></div>`).join('');
         });
     }
 
@@ -1078,14 +1193,14 @@ def index():
 
     async function renderAdminUsers(container) {
         let users = await api('/api/users');
-        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th></tr></thead><tbody>';
+        let html = '<div class="card overflow-x-auto"><h3 class="text-xl font-semibold mb-4">Управление пользователями</h3><table class="w-full"><thead><tr><th>ID</th><th>Email</th><th>ФИО</th><th>Роль</th><th>Новая роль</th><th></th><tr></thead><tbody>';
         for(let u of users) {
-            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></div>`;
+            html += `<tr><td data-label="ID">${u.id}</td><td data-label="Email">${u.email}</td><td data-label="ФИО">${u.full_name}</td><td data-label="Роль">${u.role}</td><td data-label="Новая роль"><select id="role-${u.id}"><option>client</option><option>operator</option><option>admin</option><option>quality</option></select></td><td data-label="Действия"><button class="bg-blue-600 text-white px-2 py-1 rounded text-sm hover:bg-blue-700" onclick="changeRole(${u.id})">Изменить</button> <button class="bg-red-600 text-white px-2 py-1 rounded text-sm hover:bg-red-700" onclick="delUser(${u.id})">Удалить</button></td></tr>`;
         }
         html += `</tbody></table></div>`;
         container.innerHTML = html;
         window.changeRole = async (id) => { let newRole = document.getElementById(`role-${id}`).value; await api(`/api/users/${id}/role?new_role=${newRole}`,'PUT'); notyf.success('Роль изменена'); renderAdminUsers(container); };
-        window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await fetch(`/api/users/${id}`, { method:'DELETE' }); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
+        window.delUser = async (id) => { if(confirm('Удалить пользователя?')) { await api(`/api/users/${id}`, 'DELETE'); notyf.success('Пользователь удалён'); renderAdminUsers(container); } };
     }
 
     async function renderAdminSLA(container) {
@@ -1124,8 +1239,8 @@ def index():
                     <div class="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white p-4 rounded-xl shadow"><div class="text-sm opacity-90">Ср. время решения</div><div class="text-3xl font-bold">${avgRes}<span class="text-lg"> мин</span></div></div>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="statusChartDash" height="200"></canvas></div>
-                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><canvas id="trendChartDash" height="200"></canvas></div>
+                    <div class="chart-container"><canvas id="statusChartDash" height="200"></canvas></div>
+                    <div class="chart-container"><canvas id="trendChartDash" height="200"></canvas></div>
                 </div>
                 <div class="text-xs text-gray-500 text-center mt-6">Данные обновлены: ${new Date().toLocaleString()}</div>
             </div>
@@ -1149,7 +1264,7 @@ def index():
             <div class="metric-card"><div class="text-sm">Профессионализм</div><div id="profAvg" class="text-2xl font-bold">-</div></div>
             <div class="metric-card"><div class="text-sm">Вежливость</div><div id="politenessAvg" class="text-2xl font-bold">-</div></div>
         </div>
-        <div class="mb-6"><canvas id="operatorChart" height="300"></canvas></div>
+        <div class="mb-6 chart-container"><canvas id="operatorChart" height="300"></canvas></div>
         <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Оператор</th><th>Оценок</th><th>Общая</th><th>Скорость</th><th>Проф.</th><th>Вежливость</th></tr></thead><tbody id="operatorTable"></tbody></table></div>
         </div>`;
         const users = await api('/api/users');
